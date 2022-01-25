@@ -51,6 +51,7 @@ class CNNHyper(nn.Module):
         self.l3_bias = nn.Linear(hidden_dim, self.out_dim)
 
         #comment so I can push lol
+        # trying to push again lol
 
     # Do a forward pass
     def forward(self, idx):
