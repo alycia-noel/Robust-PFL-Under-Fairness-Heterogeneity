@@ -1,20 +1,20 @@
 from collections import OrderedDict
-
+import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.nn.utils import spectral_norm
 
 # This class is the architecture for the hypernetwork
 # embedding_dim is default to 12
+# n_hidden is default to 3
 class CNNHyper(nn.Module):
     def __init__(
-            self, n_nodes, embedding_dim, in_channels=3, out_dim=10, n_kernels=16, hidden_dim=100,
-            spec_norm=False, n_hidden=1):
+            self, n_nodes, embedding_dim, context_vec, in_channels=3, out_dim=10, n_kernels=16, hidden_dim=100, n_hidden=1):
         super().__init__()
 
         self.in_channels = in_channels
         self.out_dim = out_dim
         self.n_kernels = n_kernels
+        self.context_vec = context_vec
 
         # The nn.Embedding function generates a lookup table that stores embeddings of a fixed dictionary and size
         # This module is often used to store word embeddings and retrieve them using indices. The input to the
@@ -49,9 +49,6 @@ class CNNHyper(nn.Module):
         self.l2_bias = nn.Linear(hidden_dim, 84)
         self.l3_weights = nn.Linear(hidden_dim, self.out_dim * 84)
         self.l3_bias = nn.Linear(hidden_dim, self.out_dim)
-
-        #comment so I can push lol
-        # trying to push again lol
 
     # Do a forward pass
     def forward(self, idx):
@@ -100,19 +97,9 @@ class CNNTarget(nn.Module):
         x = self.fc3(x)
         return x
 
-# This context network is right, I just need to get the input_channel, hidden_size, and vector_size right
-# The embedding network takes in a single integer, idx. We will need to figure out how to pass a vector instead
-
-#Honestly passing the vector does not make sense to me. The hypernetwork does not update the weights based on idx so I
-# do not think we gain anything by passing the context vector ... passing back \Delta\theta should capture this information
-
-# unless we update the embeddings every time we run it, i.e., replace the old embeddings with the new one and then the
-# model would run on those embeddings. Or, do an average of them?
-
-# The embeddings are SEPARATE from the hypernetwork.
-
+# The context network, generates a vector that is passed to the hypernetwork
 class ContextNetwork(nn.Module):
-    def __init__(self, input_channel = 3, hidden_size= 1, vector_size = 12):
+    def __init__(self, input_channel = 3072, hidden_size= 200, vector_size = 13):
         super(ContextNetwork, self).__init__()
         self.fc1 = nn.Linear(input_channel, hidden_size)
         self.relu1 = nn.LeakyReLU()
@@ -121,6 +108,7 @@ class ContextNetwork(nn.Module):
         self.context = nn.Linear(hidden_size, vector_size)
 
     def forward(self,x):
+        x = torch.flatten(x, 1) # flatten for processing [64 x 3072]
         hidden1 = self.fc1(x)
         relu1 = self.relu1(hidden1)
         hidden2 = self.fc2(relu1)

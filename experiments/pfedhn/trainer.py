@@ -111,12 +111,12 @@ def train(data_name: str, data_path: str, classes_per_node: int, num_nodes: int,
     if data_name == "cifar10":
         hnet = CNNHyper(num_nodes, embed_dim, hidden_dim=hyper_hid, n_hidden=n_hidden, n_kernels=n_kernels)
         net = CNNTarget(n_kernels=n_kernels)
-        cnet = ContextNetwork(input_channel= 3, hidden_size= 11, vector_size= 12)
+        cnet = ContextNetwork(input_channel= 3072, hidden_size= 200, vector_size= 13)
     elif data_name == "cifar100":
         hnet = CNNHyper(num_nodes, embed_dim, hidden_dim=hyper_hid,
                         n_hidden=n_hidden, n_kernels=n_kernels, out_dim=100)
         net = CNNTarget(n_kernels=n_kernels, out_dim=100)
-        cnet = ContextNetwork(input_size = 11, hidden_size=11, vector_size=11)
+        cnet = ContextNetwork(input_size = 3072, hidden_size=200, vector_size=13)
     else:
         raise ValueError("choose data_name from ['cifar10', 'cifar100']")
 
@@ -160,14 +160,29 @@ def train(data_name: str, data_path: str, classes_per_node: int, num_nodes: int,
 
     results = defaultdict(list)
     for step in step_iter:
-        # train the hyper network (just tells the model that we are going to train it, does not do a forward/backward pass)
+        # train the hypernetwork and context network (just tells the model that we are going to train it, does not do a forward/backward pass)
         hnet.train()
+        cnet.train()
 
         # select client at random
         node_id = random.choice(range(num_nodes))
 
+        ##########################################
+        # Need to create the context vector here #
+        ##########################################
+        batch = next(iter(nodes.test_loaders[node_id]))
+        img, label = tuple(t.to(device) for t in batch)  # img.shape [64, 3, 32, 32]
+        context_vectors = cnet(img) # context_vec shape is 64, 13
+
+        # Need to create c^i from c_k
+        # sum over the rows
+        context_vec = torch.sum(context_vectors, dim=0) # context_vec.shape = [1,13]
+        print(context_vec)
+        # divide by batch size
+        context_vec = torch.div(context_vec, bs) #context_vec.shape = [1,13]
+
         # produce & load local network weights
-        weights = hnet(torch.tensor([node_id], dtype=torch.long).to(device))
+        weights = hnet(torch.tensor([node_id], context_vec, dtype=torch.long).to(device))
 
         net.load_state_dict(weights)
 
@@ -182,9 +197,9 @@ def train(data_name: str, data_path: str, classes_per_node: int, num_nodes: int,
         # NOTE: evaluation on sent model
         with torch.no_grad():
             net.eval()
-            batch = next(iter(nodes.test_loaders[node_id]))  #shape of the data is [64, 3, 32, 32]
-
-            img, label = tuple(t.to(device) for t in batch)
+            # batch = next(iter(nodes.test_loaders[node_id]))  #shape of the data is [64, 3, 32, 32], this will be the same
+            # one that we pull for passing through the hypernetwork
+            # img, label = tuple(t.to(device) for t in batch)
             pred = net(img)
             prvs_loss = criteria(pred, label)
             prvs_acc = pred.argmax(1).eq(label).sum().item() / len(label)
@@ -196,7 +211,16 @@ def train(data_name: str, data_path: str, classes_per_node: int, num_nodes: int,
             inner_optim.zero_grad()
             optimizer.zero_grad()
 
+            ###################################################################
+            # Do we need to create a new context vector here for this batch ? #
+            # My intuition is yes                                             #
+            ###################################################################
+
             batch = next(iter(nodes.train_loaders[node_id]))
+            #####################################################
+            # Need to concat context vector with the img vector #
+            #####################################################
+
             img, label = tuple(t.to(device) for t in batch)
 
             pred = net(img)
@@ -213,6 +237,15 @@ def train(data_name: str, data_path: str, classes_per_node: int, num_nodes: int,
 
         # calculating delta theta
         delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
+
+        #######################
+        # Hypernetwork Update #
+        #######################
+        # hnet.parameters returns the following: embeddings.weight, mlp.0.weight, mlp.0.bias, lp.2.weight,
+        # mlp.2.bias, mlp.4.weight, mlp.4.bias, mlp.6.weight, mlp.6.bias, c1_weights.weight, c1_weights.bias,
+        # c1_bias.weight, c1_bias.bias, c2_weights.weight, c2_weights.bias, c2_bias.weight, c2_bias.bias,
+        # l1_weights.weight, l1_weights.bias, l1_bias.weight, l1_bias.bias, l2_weights.weight, l2_weights.bias,
+        # l2_bias.weight, l2_bias.bias, l3_weights.weight, l3_weights.bias, l3_bias.weight, l3_bias.bias
 
         # calculating phi gradient
         hnet_grads = torch.autograd.grad(
