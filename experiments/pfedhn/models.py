@@ -50,6 +50,8 @@ class CNNHyper(nn.Module):
         self.l3_weights = nn.Linear(hidden_dim, self.out_dim * 84)
         self.l3_bias = nn.Linear(hidden_dim, self.out_dim)
 
+        #comment so I can push lol
+
     # Do a forward pass
     def forward(self, idx):
         # Get the embedding for client i (referenced by idx), the idx can be 1 through 50
