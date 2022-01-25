@@ -66,14 +66,14 @@ class MLP_LR_context_detection_regularization(nn.Module):
         context_vector = self.context(relu2) #yes
         context_prediction_vectors = self.context(relu2)
 
-        ###### adaptive prediction
+        ###### adaptive prediction - we need to add this to our code to concat the context vector with the data
         prediction_vector = torch.mean(context_vector, dim=0)
         prediction_vector = prediction_vector.expand(len(x), self.vector_size)
         prediction_vector_x = torch.cat((prediction_vector, x), dim=1)
         y_prediction = self.LR_prediction(prediction_vector_x)
         y_prediction = torch.sigmoid(y_prediction)
 
-        ###### context learning --- yes
+        ###### context learning
         y_context_prediction = self.LR_context(context_prediction_vectors)
         y_context_prediction = torch.sigmoid(y_context_prediction)
 

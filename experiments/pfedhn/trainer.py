@@ -104,19 +104,20 @@ def train(data_name: str, data_path: str, classes_per_node: int, num_nodes: int,
     # we will be using automatic embedding size since default is -1
     # so the embedding dimension is the number of clients + 1 divided by 4
     if embed_dim == -1:
-        logging.info("auto embedding size")
-        embed_dim = int(1 + num_nodes / 4) # default is 1 + 50 / 4 = 51 / 4 = 12
+        #logging.info("auto embedding size")
+        #embed_dim = int(1 + num_nodes / 4)
+        embed_dim = 32
 
     # create the hypernet, local, and context network
     if data_name == "cifar10":
         hnet = CNNHyper(num_nodes, embed_dim, hidden_dim=hyper_hid, n_hidden=n_hidden, n_kernels=n_kernels)
         net = CNNTarget(n_kernels=n_kernels)
-        cnet = ContextNetwork(input_channel= 3072, hidden_size= 200, vector_size= 13)
+        cnet = ContextNetwork(input_channel= 3072, hidden_size= 200, vector_size= 32)
     elif data_name == "cifar100":
         hnet = CNNHyper(num_nodes, embed_dim, hidden_dim=hyper_hid,
                         n_hidden=n_hidden, n_kernels=n_kernels, out_dim=100)
         net = CNNTarget(n_kernels=n_kernels, out_dim=100)
-        cnet = ContextNetwork(input_size = 3072, hidden_size=200, vector_size=13)
+        cnet = ContextNetwork(input_size = 3072, hidden_size=200, vector_size=32)
     else:
         raise ValueError("choose data_name from ['cifar10', 'cifar100']")
 
@@ -172,17 +173,10 @@ def train(data_name: str, data_path: str, classes_per_node: int, num_nodes: int,
         ##########################################
         batch = next(iter(nodes.test_loaders[node_id]))
         img, label = tuple(t.to(device) for t in batch)  # img.shape [64, 3, 32, 32]
-        context_vectors = cnet(img) # context_vec shape is 64, 13
-
-        # Need to create c^i from c_k
-        # sum over the rows
-        context_vec = torch.sum(context_vectors, dim=0) # context_vec.shape = [1,13]
-        print(context_vec)
-        # divide by batch size
-        context_vec = torch.div(context_vec, bs) #context_vec.shape = [1,13]
+        context_vectors, avg_context_vector, _ = cnet(img) # context_vec shape is [64,32], avg_context_vec shape = [1,32], , prediction vec = [64, 3104]
 
         # produce & load local network weights
-        weights = hnet(torch.tensor([node_id], context_vec, dtype=torch.long).to(device))
+        weights = hnet(torch.tensor([node_id], dtype=torch.long).to(device))
 
         net.load_state_dict(weights)
 
@@ -217,13 +211,12 @@ def train(data_name: str, data_path: str, classes_per_node: int, num_nodes: int,
             ###################################################################
 
             batch = next(iter(nodes.train_loaders[node_id]))
-            #####################################################
-            # Need to concat context vector with the img vector #
-            #####################################################
-
             img, label = tuple(t.to(device) for t in batch)
+            context_vectors, _, prediction_vector = cnet(img)  # shape = [64, 3104]
 
-            pred = net(img)
+            #img, label = tuple(t.to(device) for t in batch)
+
+            pred = net(prediction_vector)
 
             loss = criteria(pred, label)
             loss.backward()
