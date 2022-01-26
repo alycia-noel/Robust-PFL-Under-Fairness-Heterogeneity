@@ -10,9 +10,13 @@ import torch
 import torch.utils.data
 from tqdm import trange # for the progress bar
 
-from experiments.pfedhn.models import CNNHyper, CNNTarget, ContextNetwork # loads the model architecture
+from experiments.pfedhn.models import Hyper, TargetAndContext # loads the model architecture
 from experiments.pfedhn.node import BaseNodes # loads the client generator
 from experiments.utils import get_device, set_logger, set_seed, str2bool # loads extra tools
+
+import warnings
+
+warnings.filterwarnings("ignore")
 
 # The function to return the evaluation results of the model to the client.
 # nodes: total number of clients
@@ -22,8 +26,8 @@ from experiments.utils import get_device, set_logger, set_seed, str2bool # loads
 # device: GPU or CPU
 # split: test (but can also be train)
 # return: current_results, average loss, average accuracy, and overall accuracy so far
-def eval_model(nodes, num_nodes, hnet, net, criteria, device, split):
-    curr_results = evaluate(nodes, num_nodes, hnet, net, criteria, device, split=split)
+def eval_model(nodes, num_nodes, hnet, combonet, criteria, device, split):
+    curr_results = evaluate(nodes, num_nodes, hnet, combonet, criteria, device, split=split)
     total_correct = sum([val['correct'] for val in curr_results.values()])
     total_samples = sum([val['total'] for val in curr_results.values()])
     avg_loss = np.mean([val['loss'] for val in curr_results.values()])
@@ -35,7 +39,7 @@ def eval_model(nodes, num_nodes, hnet, net, criteria, device, split):
 
 # The function to actually evaluate the model (i.e., test because there is no backpropagation)
 @torch.no_grad()
-def evaluate(nodes: BaseNodes, num_nodes, hnet, net, criteria, device, split='test'):
+def evaluate(nodes: BaseNodes, num_nodes, hnet, combonet, criteria, device, split='test'):
     hnet.eval()
     results = defaultdict(lambda: defaultdict(list))
 
@@ -51,10 +55,13 @@ def evaluate(nodes: BaseNodes, num_nodes, hnet, net, criteria, device, split='te
 
         for batch_count, batch in enumerate(curr_data):
             img, label = tuple(t.to(device) for t in batch)
-
-            weights = hnet(torch.tensor([node_id], dtype=torch.long).to(device))
-            net.load_state_dict(weights)
-            pred = net(img)
+            _, avg_context_vector, prediction_vector = combonet(img, contextonly=True)
+            weights = hnet(avg_context_vector)
+            net_dict = combonet.state_dict()
+            hnet_dict = {k: v for k, v in weights.items() if k in net_dict}
+            net_dict.update(hnet_dict)
+            combonet.load_state_dict(net_dict)
+            pred = combonet(img, contextonly=False)
             running_loss += criteria(pred, label).item()
             running_correct += pred.argmax(1).eq(label).sum().item()
             running_samples += len(label)
@@ -69,7 +76,7 @@ def evaluate(nodes: BaseNodes, num_nodes, hnet, net, criteria, device, split='te
 # data_name: name of dataset used, either CIFAR10 or CIFAR100
 # data_path: path to root directory of the dataset
 # classes_per_node: number of classes each client has, 2 for CIFAR10, and 10 for CIFAR100
-# num_nodes: number of clients, default is 50
+# num_nodes: number of clients, default is 25
 # steps: number of total training steps to perform, default is 5000
 # inner_steps: number of local training rounds, default is 50
 # optim: optimization function, either adam or sgd, but sgd is default
@@ -106,32 +113,20 @@ def train(data_name: str, data_path: str, classes_per_node: int, num_nodes: int,
     if embed_dim == -1:
         #logging.info("auto embedding size")
         #embed_dim = int(1 + num_nodes / 4)
-        embed_dim = 32
+        embed_dim=13
 
     # create the hypernet, local, and context network
-    if data_name == "cifar10":
-        hnet = CNNHyper(num_nodes, embed_dim, hidden_dim=hyper_hid, n_hidden=n_hidden, n_kernels=n_kernels)
-        net = CNNTarget(n_kernels=n_kernels)
-        cnet = ContextNetwork(input_channel= 3072, hidden_size= 200, vector_size= 32)
-    elif data_name == "cifar100":
-        hnet = CNNHyper(num_nodes, embed_dim, hidden_dim=hyper_hid,
-                        n_hidden=n_hidden, n_kernels=n_kernels, out_dim=100)
-        net = CNNTarget(n_kernels=n_kernels, out_dim=100)
-        cnet = ContextNetwork(input_size = 3072, hidden_size=200, vector_size=32)
-    else:
-        raise ValueError("choose data_name from ['cifar10', 'cifar100']")
+    hnet = Hyper(embed_dim, hidden_dim=hyper_hid, n_hidden=n_hidden)
+    combonet = TargetAndContext(n_hidden_nodes=100, input_size= 32*32*3, hidden_size= 200, vector_size= embed_dim)
 
     # send both of the networks to the GPU
     hnet = hnet.to(device)
-    net = net.to(device)
-    cnet = cnet.to(device)
+    combonet = combonet.to(device)
 
     ##################
     # init optimizer #
     ##################
 
-    # our embedding learning rate will be lr since it is set to None
-    embed_lr = embed_lr if embed_lr is not None else lr
     # setting up optimizers, will use SGD
     optimizers = {
         'sgd': torch.optim.SGD(
@@ -161,9 +156,8 @@ def train(data_name: str, data_path: str, classes_per_node: int, num_nodes: int,
 
     results = defaultdict(list)
     for step in step_iter:
-        # train the hypernetwork and context network (just tells the model that we are going to train it, does not do a forward/backward pass)
+        # train the hypernetwork(just tells the model that we are going to train it, does not do a forward/backward pass)
         hnet.train()
-        cnet.train()
 
         # select client at random
         node_id = random.choice(range(num_nodes))
@@ -172,17 +166,18 @@ def train(data_name: str, data_path: str, classes_per_node: int, num_nodes: int,
         # Need to create the context vector here #
         ##########################################
         batch = next(iter(nodes.test_loaders[node_id]))
-        img, label = tuple(t.to(device) for t in batch)  # img.shape [64, 3, 32, 32]
-        context_vectors, avg_context_vector, _ = cnet(img) # context_vec shape is [64,32], avg_context_vec shape = [1,32], , prediction vec = [64, 3104]
-
+        img, label = tuple(t.to(device) for t in batch)
+        context_vectors, avg_context_vector, prediction_vector = combonet(img, contextonly=True)
         # produce & load local network weights
-        weights = hnet(torch.tensor([node_id], dtype=torch.long).to(device))
-
-        net.load_state_dict(weights)
+        weights = hnet(avg_context_vector)
+        net_dict = combonet.state_dict()
+        hnet_dict = {k: v for k, v in weights.items() if k in net_dict}
+        net_dict.update(hnet_dict)
+        combonet.load_state_dict(net_dict)
 
         # init inner optimizer
         inner_optim = torch.optim.SGD(
-            net.parameters(), lr=inner_lr, momentum=.9, weight_decay=inner_wd
+            combonet.parameters(), lr=inner_lr, momentum=.9, weight_decay=inner_wd
         )
 
         # storing theta_i for later calculating delta theta
@@ -190,43 +185,34 @@ def train(data_name: str, data_path: str, classes_per_node: int, num_nodes: int,
 
         # NOTE: evaluation on sent model
         with torch.no_grad():
-            net.eval()
-            # batch = next(iter(nodes.test_loaders[node_id]))  #shape of the data is [64, 3, 32, 32], this will be the same
-            # one that we pull for passing through the hypernetwork
-            # img, label = tuple(t.to(device) for t in batch)
-            pred = net(img)
+            combonet.eval()
+            pred = combonet(img, contextonly=False)
             prvs_loss = criteria(pred, label)
             prvs_acc = pred.argmax(1).eq(label).sum().item() / len(label)
-            net.train()
+            combonet.train()
 
         # inner updates -> obtaining theta_tilda
         for i in range(inner_steps):
-            net.train()
+            combonet.train()
             inner_optim.zero_grad()
             optimizer.zero_grad()
 
-            ###################################################################
-            # Do we need to create a new context vector here for this batch ? #
-            # My intuition is yes                                             #
-            ###################################################################
-
+            # Create context vector for this batch
             batch = next(iter(nodes.train_loaders[node_id]))
             img, label = tuple(t.to(device) for t in batch)
-            context_vectors, _, prediction_vector = cnet(img)  # shape = [64, 3104]
 
-            #img, label = tuple(t.to(device) for t in batch)
-
-            pred = net(prediction_vector)
+            pred = combonet(img, contextonly=False)
 
             loss = criteria(pred, label)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(net.parameters(), 50)
+
+            torch.nn.utils.clip_grad_norm_(combonet.parameters(), 50)
 
             inner_optim.step()
 
         optimizer.zero_grad()
 
-        final_state = net.state_dict()
+        final_state = combonet.state_dict()
 
         # calculating delta theta
         delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
@@ -234,11 +220,6 @@ def train(data_name: str, data_path: str, classes_per_node: int, num_nodes: int,
         #######################
         # Hypernetwork Update #
         #######################
-        # hnet.parameters returns the following: embeddings.weight, mlp.0.weight, mlp.0.bias, lp.2.weight,
-        # mlp.2.bias, mlp.4.weight, mlp.4.bias, mlp.6.weight, mlp.6.bias, c1_weights.weight, c1_weights.bias,
-        # c1_bias.weight, c1_bias.bias, c2_weights.weight, c2_weights.bias, c2_bias.weight, c2_bias.bias,
-        # l1_weights.weight, l1_weights.bias, l1_bias.weight, l1_bias.bias, l2_weights.weight, l2_weights.bias,
-        # l2_bias.weight, l2_bias.bias, l3_weights.weight, l3_weights.bias, l3_bias.weight, l3_bias.bias
 
         # calculating phi gradient
         hnet_grads = torch.autograd.grad(
@@ -258,13 +239,13 @@ def train(data_name: str, data_path: str, classes_per_node: int, num_nodes: int,
 
         if step % eval_every == 0:
             last_eval = step
-            step_results, avg_loss, avg_acc, all_acc = eval_model(nodes, num_nodes, hnet, net, criteria, device, split="test")
+            step_results, avg_loss, avg_acc, all_acc = eval_model(nodes, num_nodes, hnet, combonet, criteria, device, split="test")
             logging.info(f"\nStep: {step+1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}")
 
             results['test_avg_loss'].append(avg_loss)
             results['test_avg_acc'].append(avg_acc)
 
-            _, val_avg_loss, val_avg_acc, _ = eval_model(nodes, num_nodes, hnet, net, criteria, device, split="val")
+            _, val_avg_loss, val_avg_acc, _ = eval_model(nodes, num_nodes, hnet, combonet, criteria, device, split="val")
             if best_acc < val_avg_acc:
                 best_acc = val_avg_acc
                 best_step = step
@@ -283,8 +264,8 @@ def train(data_name: str, data_path: str, classes_per_node: int, num_nodes: int,
             results['test_best_std_based_on_step'].append(test_best_std_based_on_step)
 
     if step != last_eval:
-        _, val_avg_loss, val_avg_acc, _ = eval_model(nodes, num_nodes, hnet, net, criteria, device, split="val")
-        step_results, avg_loss, avg_acc, all_acc = eval_model(nodes, num_nodes, hnet, net, criteria, device, split="test")
+        _, val_avg_loss, val_avg_acc, _ = eval_model(nodes, num_nodes, hnet, combonet, criteria, device, split="val")
+        step_results, avg_loss, avg_acc, all_acc = eval_model(nodes, num_nodes, hnet, combonet, criteria, device, split="test")
         logging.info(f"\nStep: {step + 1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}")
 
         results['test_avg_loss'].append(avg_loss)
@@ -326,7 +307,7 @@ if __name__ == '__main__':
         "--data-name", type=str, default="cifar10", choices=['cifar10', 'cifar100'], help="dir path for MNIST dataset"
     )
     parser.add_argument("--data-path", type=str, default="data", help="dir path for MNIST dataset")
-    parser.add_argument("--num-nodes", type=int, default=50, help="number of simulated nodes")
+    parser.add_argument("--num-nodes", type=int, default=10, help="number of simulated nodes")
 
     ##################################
     #       Optimization args        #
@@ -368,7 +349,7 @@ if __name__ == '__main__':
     device = get_device(gpus=args.gpu)
 
     if args.data_name == 'cifar10':
-        args.classes_per_node = 2
+        args.classes_per_node = 1
     else:
         args.classes_per_node = 10
 
