@@ -1,158 +1,181 @@
-from torch.utils.data import Dataset
-from collections import namedtuple
+import time
 import warnings
-
+import torch
+import torch.nn as nn
 import numpy as np
 import pandas as pd
-from pandas.core.dtypes.common import is_list_like
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
+from torch.utils.data import Dataset, DataLoader
+import torch.nn.functional as F
+from sklearn.metrics import roc_curve, auc
+
+warnings.filterwarnings("ignore")
+
+class TabularData(Dataset):
+    def __init__(self, X, y):
+        assert len(X) == len(y)
+        n, m = X.shape
+        self.n = n
+        self.m = m
+        self.X = torch.tensor(X, dtype=torch.float64)
+        self.y = torch.tensor(y, dtype=torch.float64)
+
+    def __len__(self):
+        return self.n
+
+    def __getitem__(self, idx):
+        return self.X[idx], self.y[idx]
+
+class NN(nn.Module):
+    def __init__(self, no_features=8, hidden_sizes=[64,64,32], dropout_rate = .2):
+        super(NN, self).__init__()
+        self.no_features = no_features
+        self.input_size = hidden_sizes[0]
+        self.dropout_rate = dropout_rate
+
+        self.fc1 = nn.Linear(self.no_features, hidden_sizes[0])
+        self.fc2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
+        self.fc3 = nn.Linear(hidden_sizes[1], hidden_sizes[2])
+        self.fc4 = nn.Linear(hidden_sizes[2], 1)
+
+        self.dropout = nn.Dropout(self.dropout_rate)
+
+        self.bias = torch.nn.Parameter(torch.zeros(1, ), requires_grad=True)
+
+    def forward(self, data):
+        x1 = F.relu(self.fc1(data))
+        x2 = F.relu(self.fc2(x1))
+        x3 = self.dropout(x2)
+        x4 = F.relu(self.fc3(x3))
+        x5 = self.dropout(x4)
+        y = self.fc4(x5)
+        #out = torch.sum(y, axis=-1) + self.bias
+        y = torch.sigmoid(y)
+
+        return y#, out
 
 
-class ColumnAlreadyDroppedWarning(UserWarning):
-    """Warning used if a column is attempted to be dropped twice."""
-from scipy.stats import multivariate_normal
-import torch, random, copy, os
+def plot_roc_curves(results, pred_col, resp_col, size=(7, 5), fname=None):
+    plt.clf()
+    plt.style.use('classic')
+    plt.figure(figsize=size)
 
-DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    for _, res in results.groupby('round'):
+        fpr, tpr, _ = roc_curve(res[resp_col], res[pred_col])
+        roc_auc = auc(fpr, tpr)
+        plt.plot(fpr, tpr, '-', color='orange', lw=0.5)
 
-class LogReg(torch.nn.Module):
-    """
-    Logistic regression model.
-    """
-    def __init__(self, num_features, num_classes, seed = 123):
-        torch.manual_seed(seed)
+    fpr, tpr, _ = roc_curve(results[resp_col], results[pred_col])
+    roc_auc = auc(fpr, tpr)
+    plt.plot(fpr, tpr, '-', color='darkorange', lw=1.5, label='ROC curve (area = %0.2f)' % roc_auc, )
+    plt.plot([0, 1], [0, 1], color='navy', lw=1.5, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.grid()
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.legend(loc="lower right")
+    #if fname is not None:
+    #    plt.savefig(fname)
+    #else:
+    plt.show()
 
-        super().__init__()
-        self.num_classes = num_classes
-        self.linear = torch.nn.Linear(num_features, num_classes)
+# Import the data and visualize it (if you want using df.info())
+# decile_score = risk score prediction
+url = 'https://raw.githubusercontent.com/propublica/compas-analysis/master/compas-scores-two-years.csv'
+df = pd.read_csv(url)
 
-    def forward(self, x):
-        logits = self.linear(x.float())
-        probas = torch.sigmoid(logits)
-        return probas.type(torch.FloatTensor), logits
+# Cleaning and parsing the data
+# 1. If the charge date of a defendants COMPAS score was not within 30 days from when the person was arrested, we assume that because of data
+#    quality reason, that we do not have the right offense
+# 2. If is_recid = -1 then there was no COMPAS case found
+# 3. c_charge_degree of 'O' will result in no jail time so they are removed
+df_filtered = df.loc[df['days_b_screening_arrest'] <= 30]
+df_filtered = df_filtered.loc[df_filtered['days_b_screening_arrest'] >= -30]
+df_filtered = df_filtered.loc[df_filtered['is_recid'] != -1]
+df_filtered = df_filtered.loc[df_filtered['c_charge_degree'] != "O"]
+df_filtered = df_filtered.loc[df_filtered['score_text'] != 'N/A']
+df_filtered['is_med_or_high_risk']  = (df_filtered['decile_score']>=5).astype(int)
+df_filtered['length_of_stay'] = (pd.to_datetime(df_filtered['c_jail_out']) - pd.to_datetime(df_filtered['c_jail_in']))
 
-class Mlp(torch.nn.Module):
-    """
-    MLP model.
-    """
-    def __init__(self, num_features, num_classes, seed = 123):
-        torch.manual_seed(seed)
+cols = ['sex', 'age', 'race', 'decile_score', 'length_of_stay', 'priors_count', 'c_charge_degree', 'two_year_recid', 'is_med_or_high_risk']
+compas = df_filtered[cols]
+compas['length_of_stay'] /= np.timedelta64(1, 'D')
+compas['length_of_stay'] = np.ceil(compas['length_of_stay'])
 
-        super().__init__()
-        self.num_classes = num_classes
-        self.linear1 = torch.nn.Linear(num_features, 4)
-        self.linear2 = torch.nn.Linear(4, num_classes)
-        self.relu = torch.nn.ReLU()
+cols = compas.columns
+features, decision = cols[:-1], cols[-1]
 
-    def forward(self, x):
-        out = self.linear1(x.float())
-        out = self.relu(out)
-        out = self.linear2(out)
-        probs = torch.sigmoid(out)
-        return probs.type(torch.FloatTensor), out
+encoders = {}
+for col in ['race', 'sex', 'c_charge_degree']:
+    encoders[col] = LabelEncoder().fit(compas[col])
+    compas.loc[:, col] = encoders[col].transform(compas[col])
+
+results = []
+
+for i in range(5):
+    print('\t===== Round no. {} =====\n'.format(i + 1))
+    d_train, d_test = train_test_split(compas, test_size=500)
+    data_train = TabularData(d_train[features].values, d_train[decision].values)
+    data_test = TabularData(d_test[features].values, d_test[decision].values)
+
+    model = NN()
+    model = model.double()
+
+    loader = DataLoader(data_train, shuffle = True, batch_size = 16)
+    optimizer = torch.optim.Adam(model.parameters(), lr = 2.e-4, weight_decay = 0.)
+    loss = nn.BCELoss(reduction='none') #Binary Cross Entropy loss
+    no_batches = len(loader)
+
+    # Train model
+    for epoch in range(20):
+        start = time.time()
+        for i, (x, y) in enumerate(loader):
+            optimizer.zero_grad()
+            y_ = model(x)
+            #y_, p_ = model(x)
+            #pen = torch.norm(p_, dim=1)
+            err = loss(y_.flatten(), y) #+ .2 * pen
+            err = err.mean()
+
+            err.backward()
+            optimizer.step()
 
 
-DATA_HOME_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                 '..', 'data', 'raw')
-COMPAS_URL = 'https://raw.githubusercontent.com/propublica/compas-analysis/master/compas-scores-two-years.csv'
+            if i % 20 == 0:
+                print(
+                    'Epoch: {0}/{1};\t Batch: {2}/{3};\t Err: {4:1.3f}'.format(epoch + 1, 20, i + 1, no_batches,
+                                                                               err.item()))
 
-def fetch_compas(data_home=None, binary_race=False,
-                 usecols=['sex', 'age', 'age_cat', 'race', 'juv_fel_count',
-                          'juv_misd_count', 'juv_other_count', 'priors_count',
-                          'c_charge_degree', 'c_charge_desc'],
-                 dropcols=[], numeric_only=False, dropna=True):
-    cache_path = os.path.join(data_home or DATA_HOME_DEFAULT,
-                              os.path.basename(COMPAS_URL))
-    if os.path.isfile(cache_path):
-        df = pd.read_csv(cache_path, index_col='id')
-    else:
-        df = pd.read_csv(COMPAS_URL, index_col='id')
-        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-        df.to_csv(cache_path)
+        print('\n\t Epoch finished in {:1.2f} seconds!\n'.format(time.time() - start))
 
-    # Perform the same preprocessing as the original analysis:
-    # https://github.com/propublica/compas-analysis/blob/master/Compas%20Analysis.ipynb
-    df = df[(df.days_b_screening_arrest <= 30)
-          & (df.days_b_screening_arrest >= -30)
-          & (df.is_recid != -1)
-          & (df.c_charge_degree != 'O')
-          & (df.score_text != 'N/A')]
+    # Eval Model
+    model.eval()
+    with torch.no_grad():
+        y_ = model(data_test.X)
+        #y_, p_ = model(data_test.X)
+        y_ = y_.flatten().numpy()
+        #p_ = p_.numpy()
 
-    for col in ['sex', 'age_cat', 'race', 'c_charge_degree', 'c_charge_desc']:
-        df[col] = df[col].astype('category')
+    res = (
+        pd  .DataFrame(columns = features, index = d_test.index)
+            .add_suffix('_partial')
+            .join(d_test)
+            .assign(prediction=y_)
+            .assign(round=i)
+    )
 
-    # 'Survived' < 'Recidivated'
-    cats = ['Survived', 'Recidivated']
-    df.two_year_recid = df.two_year_recid.replace([0, 1], cats).astype('category')
-    df.two_year_recid = df.two_year_recid.cat.set_categories(cats, ordered=True)
+    results.append(res)
+#.DataFrame(p_, columns=features, index=d_test.index)
+#.add_suffix('_partial')
 
-    if binary_race:
-        # 'African-American' < 'Caucasian'
-        df.race = df.race.cat.set_categories(['African-American', 'Caucasian'],
-                                             ordered=True)
+results = pd.concat(results)
+for col, encoder in encoders.items():
+        results.loc[:,col] = encoder.inverse_transform(results[col])
 
-    # 'Male' < 'Female'
-    df.sex = df.sex.astype('category').cat.reorder_categories(
-            ['Male', 'Female'], ordered=True)
 
-    return standardize_dataset(df, prot_attr=['sex', 'race'],
-                               target='two_year_recid', usecols=usecols,
-                               dropcols=dropcols, numeric_only=numeric_only,
-                               dropna=dropna)
+plot_roc_curves(results, 'prediction', 'two_year_recid', size=(5, 3), fname='./results/roc.png')
 
-def check_already_dropped(labels, dropped_cols, name, dropped_by='numeric_only',
-                          warn=True):
-    if not is_list_like(labels):
-        labels = [labels]
-    str_labels = [c for c in labels if isinstance(c, str)]
-    already_dropped = dropped_cols.intersection(str_labels)
-    if warn and any(already_dropped):
-        warnings.warn("Some column labels from `{}` were already dropped by "
-                "`{}`:\n{}".format(name, dropped_by, already_dropped.tolist()),
-                ColumnAlreadyDroppedWarning, stacklevel=2)
-    return [c for c in labels if not isinstance(c, str) or c not in already_dropped]
-
-def standardize_dataset(df, prot_attr, target, sample_weight=None, usecols=[],
-                       dropcols=[], numeric_only=False, dropna=True):
-    orig_cols = df.columns
-    if numeric_only:
-        for col in df.select_dtypes('category'):
-            if df[col].cat.ordered:
-                df[col] = df[col].factorize(sort=True)[0]
-                df[col] = df[col].replace(-1, np.nan)
-        df = df.select_dtypes(['number', 'bool'])
-    nonnumeric = orig_cols.difference(df.columns)
-
-    prot_attr = check_already_dropped(prot_attr, nonnumeric, 'prot_attr')
-    if len(prot_attr) == 0:
-        raise ValueError("At least one protected attribute must be present.")
-    df = df.set_index(prot_attr, drop=False, append=True)
-
-    target = check_already_dropped(target, nonnumeric, 'target')
-    if len(target) == 0:
-        raise ValueError("At least one target must be present.")
-    y = pd.concat([df.pop(t) for t in target], axis=1).squeeze()  # maybe Series
-
-    # Column-wise drops
-    orig_cols = df.columns
-    if usecols:
-        usecols = check_already_dropped(usecols, nonnumeric, 'usecols')
-        df = df[usecols]
-    unused = orig_cols.difference(df.columns)
-
-    dropcols = check_already_dropped(dropcols, nonnumeric, 'dropcols', warn=False)
-    dropcols = check_already_dropped(dropcols, unused, 'dropcols', 'usecols', False)
-    df = df.drop(columns=dropcols)
-
-    # Index-wise drops
-    if dropna:
-        notna = df.notna().all(axis=1) & y.notna()
-        df = df.loc[notna]
-        y = y.loc[notna]
-
-    if sample_weight is not None:
-        return namedtuple('WeightedDataset', ['X', 'y', 'sample_weight'])(
-                          df, y, df.pop(sample_weight).rename('sample_weight'))
-    print(namedtuple('Dataset', ['X', 'y'])(df, y))
-    return namedtuple('Dataset', ['X', 'y'])(df, y)
-
-fetch_compas()
+#plot_shape_functions( results, features, **args['plotting']['shapes'])
