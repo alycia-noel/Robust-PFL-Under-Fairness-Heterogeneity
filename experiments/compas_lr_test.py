@@ -111,43 +111,56 @@ train_loader = DataLoader(data_train, shuffle = True, batch_size = 16)
 test_loader = DataLoader(data_test, shuffle = False, batch_size= 16)
 
 optimizer = torch.optim.Adam(model.parameters(), lr = 2.e-4, weight_decay = 0.)
-loss = nn.MSELoss()
+loss = nn.BCELoss(reduction='none')
 no_batches = len(train_loader)
+loss_values =[]
 
 # Train model
 for epoch in range(250):
     start = time.time()
+    running_loss = 0.0
+    correct = 0.0
+    total = 0.0
     for i, (x, y) in enumerate(train_loader):
         optimizer.zero_grad()
         y_ = model(x)
         err = loss(y_.flatten(), y)
         err = err.mean()
+        running_loss += err.item() * x.size(0)
         err.backward()
         optimizer.step()
 
-        #if i % 354 == 0:
-    print('Epoch: {0}/{1};\t Err: {2:1.3f}'.format(epoch + 1, 250, err.item()))
-    #\t Batch: {2}/{3};\t Err: {4:1.3f}'.format(epoch + 1, 250, i + 1, no_batches, err.item()))
+        classes = torch.argmax(y_, dim=1)
+        correct += torch.mean((classes == y).float())
 
-    #print('\n\t Epoch finished in {:1.2f} seconds!\n'.format(time.time() - start))
+    accuracy = (100 * correct / len(train_loader))
+    loss_values.append(running_loss / len(train_loader))
+
+    if epoch == 249 or (epoch % 50 == 0 and epoch != 0):
+        plt.plot(loss_values)
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Loss over Epochs for LR Model')
+        plt.show()
+
+    print('Epoch: {0}/{1};\t Err: {2:1.3f};\tAcc:{3:1.3f}'.format(epoch + 1, 250, err.item(), accuracy))
+
 
 # Eval Model
-    model.eval()
-    with torch.no_grad():
-        y_ = model(data_test.X)
-        #y_, p_ = model(data_test.X)
-        y_ = y_.flatten().numpy()
-        #p_ = p_.numpy()
+model.eval()
+with torch.no_grad():
+    y_ = model(data_test.X)
+    y_ = y_.flatten().numpy()
 
-    res = (
-        pd  .DataFrame(columns = features, index = d_test.index)
-            .add_suffix('_partial')
-            .join(d_test)
-            .assign(prediction=y_)
-            .assign(round=i)
-    )
+res = (
+    pd  .DataFrame(columns = features, index = d_test.index)
+        .add_suffix('_partial')
+        .join(d_test)
+        .assign(prediction=y_)
+        .assign(round=i)
+)
 
-    results.append(res)
+results.append(res)
 
 results = pd.concat(results)
 for col, encoder in encoders.items():

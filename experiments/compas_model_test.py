@@ -51,10 +51,9 @@ class NN(nn.Module):
         x4 = F.relu(self.fc3(x3))
         x5 = self.dropout(x4)
         y = self.fc4(x5)
-        #out = torch.sum(y, axis=-1) + self.bias
         y = torch.sigmoid(y)
 
-        return y#, out
+        return y
 
 
 def plot_roc_curves(results, pred_col, resp_col, size=(7, 5), fname=None):
@@ -101,7 +100,9 @@ df_filtered['is_med_or_high_risk']  = (df_filtered['decile_score']>=5).astype(in
 df_filtered['length_of_stay'] = (pd.to_datetime(df_filtered['c_jail_out']) - pd.to_datetime(df_filtered['c_jail_in']))
 
 cols = ['sex', 'age', 'race', 'decile_score', 'length_of_stay', 'priors_count', 'c_charge_degree', 'two_year_recid', 'is_med_or_high_risk']
+#cols = ['age', 'priors_count', 'two_year_recid']
 compas = df_filtered[cols]
+
 compas['length_of_stay'] /= np.timedelta64(1, 'D')
 compas['length_of_stay'] = np.ceil(compas['length_of_stay'])
 
@@ -115,61 +116,64 @@ for col in ['race', 'sex', 'c_charge_degree']:
 
 results = []
 
-for i in range(5):
-    print('\t===== Round no. {} =====\n'.format(i + 1))
-    d_train, d_test = train_test_split(compas, test_size=500)
-    data_train = TabularData(d_train[features].values, d_train[decision].values)
-    data_test = TabularData(d_test[features].values, d_test[decision].values)
+d_train, d_test = train_test_split(compas, test_size=500)
+data_train = TabularData(d_train[features].values, d_train[decision].values)
+data_test = TabularData(d_test[features].values, d_test[decision].values)
 
-    model = NN()
-    model = model.double()
+model = NN()
+model = model.double()
 
-    loader = DataLoader(data_train, shuffle = True, batch_size = 16)
-    optimizer = torch.optim.Adam(model.parameters(), lr = 2.e-4, weight_decay = 0.)
-    loss = nn.BCELoss(reduction='none') #Binary Cross Entropy loss
-    no_batches = len(loader)
+loader = DataLoader(data_train, shuffle = True, batch_size = 16)
+optimizer = torch.optim.Adam(model.parameters(), lr = 2.e-4, weight_decay = 0.)
+loss = nn.BCELoss(reduction='none') #Binary Cross Entropy loss
+no_batches = len(loader)
+loss_values = []
+# Train model
+for epoch in range(250):
+    start = time.time()
+    running_loss = 0.0
+    correct = 0.0
+    total = 0.0
+    for i, (x, y) in enumerate(loader):
+        optimizer.zero_grad()
+        y_ = model(x)
+        err = loss(y_.flatten(), y)
+        err = err.mean()
+        running_loss += err.item() * x.size(0)
+        err.backward()
+        optimizer.step()
 
-    # Train model
-    for epoch in range(20):
-        start = time.time()
-        for i, (x, y) in enumerate(loader):
-            optimizer.zero_grad()
-            y_ = model(x)
-            #y_, p_ = model(x)
-            #pen = torch.norm(p_, dim=1)
-            err = loss(y_.flatten(), y) #+ .2 * pen
-            err = err.mean()
+        classes = torch.argmax(y_, dim=1) # returns the class with the highest score
+        correct += torch.mean((classes == y).float())
 
-            err.backward()
-            optimizer.step()
+    accuracy = (100 * correct / len(loader))
+    loss_values.append(running_loss / len(loader))
 
+    if epoch == 249 or (epoch % 50 == 0 and epoch != 0):
+        plt.plot(loss_values)
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Loss over Epochs for LR Model')
+        plt.show()
+        # if i % 354 == 0:
 
-            if i % 20 == 0:
-                print(
-                    'Epoch: {0}/{1};\t Batch: {2}/{3};\t Err: {4:1.3f}'.format(epoch + 1, 20, i + 1, no_batches,
-                                                                               err.item()))
+    print('Epoch: {0}/{1};\t Err: {2:1.3f};\tAcc:{3:1.3f}'.format(epoch + 1, 250, err.item(), accuracy))
 
-        print('\n\t Epoch finished in {:1.2f} seconds!\n'.format(time.time() - start))
+# Eval Model
+model.eval()
+with torch.no_grad():
+    y_ = model(data_test.X)
+    y_ = y_.flatten().numpy()
 
-    # Eval Model
-    model.eval()
-    with torch.no_grad():
-        y_ = model(data_test.X)
-        #y_, p_ = model(data_test.X)
-        y_ = y_.flatten().numpy()
-        #p_ = p_.numpy()
+res = (
+    pd  .DataFrame(columns = features, index = d_test.index)
+        .add_suffix('_partial')
+        .join(d_test)
+        .assign(prediction=y_)
+        .assign(round=i)
+)
 
-    res = (
-        pd  .DataFrame(columns = features, index = d_test.index)
-            .add_suffix('_partial')
-            .join(d_test)
-            .assign(prediction=y_)
-            .assign(round=i)
-    )
-
-    results.append(res)
-#.DataFrame(p_, columns=features, index=d_test.index)
-#.add_suffix('_partial')
+results.append(res)
 
 results = pd.concat(results)
 for col, encoder in encoders.items():
@@ -177,5 +181,3 @@ for col, encoder in encoders.items():
 
 
 plot_roc_curves(results, 'prediction', 'two_year_recid', size=(5, 3), fname='./results/roc.png')
-
-#plot_shape_functions( results, features, **args['plotting']['shapes'])
