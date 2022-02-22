@@ -10,7 +10,7 @@ import torch
 import torch.utils.data
 from tqdm import trange # for the progress bar
 
-from experiments.pfedhn.models import Hyper, TargetAndContext # loads the model architecture
+from experiments.pfedhn.models import HyperCIFAR, TargetAndContextCIFAR # loads the model architecture
 from experiments.pfedhn.node import BaseNodes # loads the client generator
 from experiments.utils import get_device, set_logger, set_seed, str2bool # loads extra tools
 
@@ -116,8 +116,8 @@ def train(data_name: str, data_path: str, classes_per_node: int, num_nodes: int,
         embed_dim=13
 
     # create the hypernet, local, and context network
-    hnet = Hyper(embed_dim, hidden_dim=hyper_hid, n_hidden=n_hidden)
-    combonet = TargetAndContext(n_hidden_nodes=100, input_size= 32*32*3, hidden_size= 200, vector_size= embed_dim)
+    hnet = HyperCIFAR(embed_dim, hidden_dim=hyper_hid, n_hidden=n_hidden)
+    combonet = TargetAndContextCIFAR(n_hidden_nodes=100, input_size= 32*32*3, hidden_size= 200, vector_size= embed_dim)
 
     # send both of the networks to the GPU
     hnet = hnet.to(device)

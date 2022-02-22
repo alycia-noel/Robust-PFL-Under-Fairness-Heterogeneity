@@ -10,6 +10,7 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
 from sklearn.metrics import roc_curve, auc
+from torchsummary import summary
 
 warnings.filterwarnings("ignore")
 
@@ -41,8 +42,6 @@ class NN(nn.Module):
         self.fc4 = nn.Linear(hidden_sizes[2], 1)
 
         self.dropout = nn.Dropout(self.dropout_rate)
-
-        self.bias = torch.nn.Parameter(torch.zeros(1, ), requires_grad=True)
 
     def forward(self, data):
         x1 = F.relu(self.fc1(data))
@@ -113,7 +112,8 @@ encoders = {}
 for col in ['race', 'sex', 'c_charge_degree']:
     encoders[col] = LabelEncoder().fit(compas[col])
     compas.loc[:, col] = encoders[col].transform(compas[col])
-
+print(len(compas))
+exit(1)
 results = []
 
 d_train, d_test = train_test_split(compas, test_size=500)
@@ -121,6 +121,8 @@ data_train = TabularData(d_train[features].values, d_train[decision].values)
 data_test = TabularData(d_test[features].values, d_test[decision].values)
 
 model = NN()
+summary(model, (16,8))
+exit(1)
 model = model.double()
 
 loader = DataLoader(data_train, shuffle = True, batch_size = 16)

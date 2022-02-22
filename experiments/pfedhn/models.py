@@ -3,12 +3,11 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from experiments.utils import get_device
-# This class is the architecture for the hypernetwork
+
+# This class is the architecture for the CIFAR hypernetwork
 # embedding_dim is default to 12
 # n_hidden is default to 3
-
-# Don't need to change much here, just the sizes of the layers and the number of them, also the in_channels and so on
-class Hyper(nn.Module):
+class HyperCIFAR(nn.Module):
     def __init__(
             self, embedding_dim, in_channels=3, out_dim=10, hidden_dim=100, n_hidden=1):
         super().__init__()
@@ -58,10 +57,10 @@ class Hyper(nn.Module):
 
         return weights
 
-# Create the architecture that each client uses
-class TargetAndContext(nn.Module):
+# Create the architecture that each client uses for CIFAR
+class TargetAndContextCIFAR(nn.Module):
     def __init__(self, n_hidden_nodes, keep_rate = 0, input_size = 3072, hidden_size = 200, vector_size = 13):  #in_channels=3, n_kernels=16, out_dim=10):
-        super(TargetAndContext, self).__init__()
+        super(TargetAndContextCIFAR, self).__init__()
 
         self.n_hidden_nodes = n_hidden_nodes
         self.input_size = input_size
@@ -111,33 +110,109 @@ class TargetAndContext(nn.Module):
         x = self.fc2_drop(x)
         return nn.functional.log_softmax(self.out(x))
 
+#####################################################################################################################
+# COMPAS NN Models
+class HyperCOMPASNN(nn.Module):
+    def __init__(
+            self, embedding_dim, in_channels=3, out_dim=10, hidden_dim=100, n_hidden=1):
+        super().__init__()
 
-# The context network, generates a vector that is passed to the hypernetwork
-# class ContextNetwork(nn.Module):
-#     def __init__(self, input_size = 3072, hidden_size= 200, vector_size = 13):
-#         super(ContextNetwork, self).__init__()
-#         self.fc1 = nn.Linear(input_size, hidden_size)
-#         self.relu1 = nn.LeakyReLU()
-#         self.fc2 = nn.Linear(hidden_size, hidden_size)
-#         self.relu2 = nn.LeakyReLU()
-#         self.context = nn.Linear(hidden_size, vector_size)
-#
-#
-#         self.vector_size = vector_size
-#
-#     def forward(self,x):
-#         x = torch.flatten(x, 1) # flatten for processing [64 x 3072]
-#         hidden1 = self.fc1(x)
-#         relu1 = self.relu1(hidden1)
-#         hidden2 = self.fc2(relu1)
-#         relu2 = self.relu2(hidden2)
-#         context_vector = self.context(relu2)
-#
-#         ###### adaptive prediction
-#         avg_context_vector = torch.mean(context_vector, dim=0) #[13]
-#
-#         prediction_vector = avg_context_vector.expand(len(x), self.vector_size)
-#         prediction_vector = torch.cat((prediction_vector, x), dim=1) # shape = [64, 3104]
-#
-#         return context_vector, avg_context_vector, prediction_vector
+        self.in_channels = in_channels
+        self.out_dim = out_dim
+        self.hidden_dim = hidden_dim
 
+        # create the number of needed layers, so initial linear, activation functions (ReLU), and the needed hidden
+        # linear layers
+        layers = [
+             nn.Linear(embedding_dim, hidden_dim), #[13, 100]
+             nn.ReLU(inplace=True),
+             nn.Linear(hidden_dim, hidden_dim),
+             nn.ReLU(inplace=True),
+             nn.linear(hidden_dim, 8+13)
+        ]
+
+        # create the entire mlp from the above layers
+        self.mlp = nn.Sequential(*layers) #final layer is [100,100]
+
+        # Generating a way to save the weights and biases by creating linear layers of the right size so that they
+        # can be passed to the clients to load into their network
+        self.fc1_weights = nn.Linear(8 + 13, 64)
+        self.fc1_bias = nn.Linear(8, 8)
+        self.fc2_weights = nn.Linear(64, 64)
+        self.fc2_bias = nn.Linear(64, 64)
+        self.fc3_weights = nn.Linear(64, 32)
+        self.fc3_bias = nn.Linear(64, 64)
+        self.fc4_weights = nn.Linear(32, 1)
+        self.fc4_bias = nn.Linear(32, 32)
+
+    # Do a forward pass
+    def forward(self, context_vec):
+        context_vec = context_vec.view(1, 13) #[1,13]
+
+        # Generate the weight output features by passing the context_vector through the hypernetwork mlp
+        features = self.mlp(context_vec) #[1, 100]
+
+        weights = OrderedDict({
+            "fc1.weight": self.fc1_weights(features).view(8 + 13, 64),
+            "fc1.bias": self.fc1_bias(features).view(-1),
+            "fc2.weight": self.fc2_weights(features).view(64, 64),
+            "fc2.bias": self.fc2_bias(features).view(-1),
+            "fc3.weight": self.fc3_weights(features).view(64, 32),
+            "fc3.bias": self.fc3_bias(features).view(-1),
+            "fc4.weight": self.out_weights(features).view(32, 1),
+            "fc4.bias": self.out_bias(features).view(-1),
+        })
+
+        return weights
+
+class TargetAndContextCOMPASNN(nn.Module):
+    def __init__(self, no_features = 8, hidden_sizes=[64,64,32], dropout_rate = .2, vector_size = 13):
+        super(TargetAndContextCOMPASNN, self).__init__()
+
+        self.input_size = no_features
+        self.dropout_rate = dropout_rate
+        self.hidden_size = 200
+        self.dropout = nn.Dropout(self.dropout_rate)
+        self.vector_size = vector_size
+
+        # Context network
+        self.context_fc1 = nn.Linear(self.input_size, self.hidden_size)
+        self.context_relu1 = nn.LeakyReLU()
+        self.context_fc2 = nn.Linear(self.hidden_size, self.hidden_size)
+        self.context_relu2 = nn.LeakyReLU()
+        self.context_context = nn.Linear(self.hidden_size, self.vector_size)
+
+        # Target Network
+        self.fc1 = nn.Linear(self.no_features + self.vector_size, hidden_sizes[0])
+        self.fc2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
+        self.fc3 = nn.Linear(hidden_sizes[1], hidden_sizes[2])
+        self.fc4 = nn.Linear(hidden_sizes[2], 1)
+
+    def forward(self, x, contextonly):
+        # pass through context vector
+        x = torch.flatten(x, 1)
+        hidden1 = self.context_fc1(x)
+        relu1 = self.context_relu1(hidden1)
+        hidden2 = self.context_fc2(relu1)
+        relu2 = self.context_relu2(hidden2)
+        context_vector = self.context_context(relu2)
+
+        ###### adaptive prediction
+        avg_context_vector = torch.mean(context_vector, dim=0)  # [13]
+
+        prediction_vector = avg_context_vector.expand(len(x), self.vector_size)
+        prediction_vector = torch.cat((prediction_vector, x), dim=1)
+
+        # If we just need the context vector for the hypernet
+        if contextonly == True:
+            return context_vector, avg_context_vector, prediction_vector
+
+        x1 = F.relu(self.fc1(x))
+        x2 = F.relu(self.fc2(x1))
+        x3 = self.dropout(x2)
+        x4 = F.relu(self.fc3(x3))
+        x5 = self.dropout(x4)
+        y = self.fc4(x5)
+        y = torch.sigmoid(y)
+
+        return y

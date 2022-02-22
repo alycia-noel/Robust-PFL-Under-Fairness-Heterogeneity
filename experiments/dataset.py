@@ -6,11 +6,29 @@
 # Imports
 import random
 from collections import defaultdict
-
+import pandas as pd
 import numpy as np
 import torch.utils.data
+from torch.utils.data import Dataset, DataLoader
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
 import torchvision.transforms as transforms
 from torchvision.datasets import CIFAR10, CIFAR100
+
+class TabularData(Dataset):
+    def __init__(self, X, y):
+        assert len(X) == len(y)
+        n, m = X.shape
+        self.n = n
+        self.m = m
+        self.X = torch.tensor(X, dtype=torch.float64)
+        self.y = torch.tensor(y, dtype=torch.float64)
+
+    def __len__(self):
+        return self.n
+
+    def __getitem__(self, idx):
+        return self.X[idx], self.y[idx]
 
 # This function returns the needed data splits for training, validating, and testing for CIFAR10 and CIFAR100
 # data_name: name of dataset, choose from [cifar10, cifar100]
@@ -28,42 +46,75 @@ def get_datasets(data_name, dataroot, normalize=True, val_size=10000):
     elif data_name == 'cifar100':
         normalization = transforms.Normalize((0.5071, 0.4865, 0.4409), (0.2673, 0.2564, 0.2762))
         data_obj = CIFAR100
+    elif data_name == 'COMPAS':
+        url = 'https://raw.githubusercontent.com/propublica/compas-analysis/master/compas-scores-two-years.csv'
+        df = pd.read_csv(url)
+        df_filtered = df.loc[df['days_b_screening_arrest'] <= 30]
+        df_filtered = df_filtered.loc[df_filtered['days_b_screening_arrest'] >= -30]
+        df_filtered = df_filtered.loc[df_filtered['is_recid'] != -1]
+        df_filtered = df_filtered.loc[df_filtered['c_charge_degree'] != "O"]
+        df_filtered = df_filtered.loc[df_filtered['score_text'] != 'N/A']
+        df_filtered['is_med_or_high_risk'] = (df_filtered['decile_score'] >= 5).astype(int)
+        df_filtered['length_of_stay'] = (
+        pd.to_datetime(df_filtered['c_jail_out']) - pd.to_datetime(df_filtered['c_jail_in']))
+        cols = ['sex', 'age', 'race', 'decile_score', 'length_of_stay', 'priors_count', 'c_charge_degree',
+                'two_year_recid', 'is_med_or_high_risk']
+        compas = df_filtered[cols]
+
+        compas['length_of_stay'] /= np.timedelta64(1, 'D')
+        compas['length_of_stay'] = np.ceil(compas['length_of_stay'])
+
+        cols = compas.columns
+        features, decision = cols[:-1], cols[-1]
+
+        encoders = {}
+        for col in ['race', 'sex', 'c_charge_degree']:
+            encoders[col] = LabelEncoder().fit(compas[col])
+            compas.loc[:, col] = encoders[col].transform(compas[col])
     else:
-        raise ValueError("choose data_name from ['mnist', 'cifar10', 'cifar100']")
+        raise ValueError("choose data_name from ['COMPAS', 'cifar10', 'cifar100']")
 
     # Start of transformation function
-    trans = [transforms.ToTensor()]
+    if data_name != 'COMPAS':
+        trans = [transforms.ToTensor()]
 
-    # If normalizing, first transform the data to a tensor then normalize it
-    if normalize:
-        trans.append(normalization)
+        # If normalizing, first transform the data to a tensor then normalize it
+        if normalize:
+            trans.append(normalization)
 
-    # Full transformation function
-    transform = transforms.Compose(trans)
+        # Full transformation function
+        transform = transforms.Compose(trans)
 
-    # Build the train+val dataset
-    dataset = data_obj(
-        dataroot,
-        train=True,
-        download=True,
-        transform=transform
-    )
+        # Build the train+val dataset
+        dataset = data_obj(
+            dataroot,
+            train=True,
+            download=True,
+            transform=transform
+        )
 
-    # Build the test dataset
-    test_set = data_obj(
-        dataroot,
-        train=False,
-        download=True,
-        transform=transform
-    )
+        # Build the test dataset
+        test_set = data_obj(
+            dataroot,
+            train=False,
+            download=True,
+            transform=transform
+        )
 
-    # Separate dataset into the train set and val set
-    train_size = len(dataset) - val_size
-    train_set, val_set = torch.utils.data.random_split(dataset, [train_size, val_size])
+        # Separate dataset into the train set and val set
+        train_size = len(dataset) - val_size
+        train_set, val_set = torch.utils.data.random_split(dataset, [train_size, val_size])
 
-    # Return the datasets
-    return train_set, val_set, test_set
+        # Return the datasets
+        return train_set, val_set, test_set
 
+    if data_name == 'COMPAS':
+        d_train, d_test = train_test_split(compas, test_size=500) #5672, 500
+        data_train = TabularData(d_train[features].values, d_train[decision].values)
+        test_set = TabularData(d_test[features].values, d_test[decision].values)
+        train_set, val_set = torch.utils.data.random_split(data_train, [5172, 500])
+
+        return train_set, val_set, test_set
 
 # This function pulls relevant information about the dataset such as the number of classes, number of samples,
 # and a list of data labels
@@ -103,7 +154,7 @@ def get_num_classes_samples(dataset):
 # return: a dictionary mapping between the classes and proportions for a client. Each entry in the dictionary is
 #         a different client
 
-def gen_classes_per_node(dataset, num_users, classes_per_user=2, high_prob=0.6, low_prob=0.4):
+def gen_classes_per_node(dataset, num_users, classes_per_user=1, high_prob=0.6, low_prob=0.4):
     # Get the number of classes and number of samples per class of the entire dataset
     num_classes, num_samples, _ = get_num_classes_samples(dataset)
 
