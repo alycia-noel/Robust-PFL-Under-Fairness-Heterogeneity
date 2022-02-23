@@ -56,9 +56,9 @@ def evaluate(nodes: BaseNodes, num_nodes, hnet, combonet, criteria, device, spli
         for batch_count, batch in enumerate(curr_data):
             img, label = tuple(t.to(device) for t in batch)
             _, avg_context_vector, prediction_vector = combonet(img, contextonly=True)
-            weights = hnet(avg_context_vector)
+            weights_1 = hnet(avg_context_vector)
             net_dict = combonet.state_dict()
-            hnet_dict = {k: v for k, v in weights.items() if k in net_dict}
+            hnet_dict = {k: v for k, v in weights_1.items() if k in net_dict}
             net_dict.update(hnet_dict)
             combonet.load_state_dict(net_dict)
             pred = combonet(img, contextonly=False)

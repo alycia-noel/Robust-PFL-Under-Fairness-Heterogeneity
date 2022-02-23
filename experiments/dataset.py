@@ -1,7 +1,4 @@
 # This file handles the data download, parsing, and preparation
-# It is configured for images (CIFAR10 and CIFAR 100)
-# TODO:
-    # Need to add capability for tabular data
 
 # Imports
 import random
@@ -14,30 +11,37 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 import torchvision.transforms as transforms
 from torchvision.datasets import CIFAR10, CIFAR100
+import warnings
+warnings.filterwarnings("ignore")
 
 class TabularData(Dataset):
-    def __init__(self, X, y):
+    def __init__(self, X, y, train=True, download=False, transform=None):
         assert len(X) == len(y)
         n, m = X.shape
         self.n = n
         self.m = m
         self.X = torch.tensor(X, dtype=torch.float64)
-        self.y = torch.tensor(y, dtype=torch.float64)
+        self.targets = torch.tensor(y, dtype=torch.float64)
+        self.transform = transform
+        self.train = train
+        self.download = download
 
     def __len__(self):
         return self.n
 
-    def __getitem__(self, idx):
-        return self.X[idx], self.y[idx]
+    def __getitem__(self, index):
+        img = self.X[index]
+        target = self.targets[index]
+        return img, target
 
-# This function returns the needed data splits for training, validating, and testing for CIFAR10 and CIFAR100
-# data_name: name of dataset, choose from [cifar10, cifar100]
+# This function returns the needed data splits for training, validating, and testing
+# data_name: name of dataset, choose from [cifar10, cifar100, COMPAS]
 # dataroot: root to data dir
 # normalize: True/False to normalize the data [default is true]
-# val_size: validation split size (in #samples, default is 10,000)
+# val_size: validation split size
 # return: train_set, val_set, test_set (tuple of pytorch dataset/subset)
 
-def get_datasets(data_name, dataroot, normalize=True, val_size=10000):
+def get_datasets(data_name, dataroot, normalize, val_size):
 
     # set normalization function and data_objects for the datasets
     if data_name =='cifar10':
@@ -64,13 +68,19 @@ def get_datasets(data_name, dataroot, normalize=True, val_size=10000):
         compas['length_of_stay'] /= np.timedelta64(1, 'D')
         compas['length_of_stay'] = np.ceil(compas['length_of_stay'])
 
-        cols = compas.columns
-        features, decision = cols[:-1], cols[-1]
-
         encoders = {}
         for col in ['race', 'sex', 'c_charge_degree']:
             encoders[col] = LabelEncoder().fit(compas[col])
             compas.loc[:, col] = encoders[col].transform(compas[col])
+
+        client_1 = compas[compas['age'] <= 31] #3164
+        client_2 = compas[compas['age'] > 31] #3008
+
+        cols_1 = client_1.columns
+        features_1, decision_1 = cols_1[:-1], cols_1[-1]
+
+        cols_2 = client_2.columns
+        features_2, decision_2 = cols_2[:-1], cols_2[-1]
     else:
         raise ValueError("choose data_name from ['COMPAS', 'cifar10', 'cifar100']")
 
@@ -109,12 +119,17 @@ def get_datasets(data_name, dataroot, normalize=True, val_size=10000):
         return train_set, val_set, test_set
 
     if data_name == 'COMPAS':
-        d_train, d_test = train_test_split(compas, test_size=500) #5672, 500
-        data_train = TabularData(d_train[features].values, d_train[decision].values)
-        test_set = TabularData(d_test[features].values, d_test[decision].values)
-        train_set, val_set = torch.utils.data.random_split(data_train, [5172, 500])
+        d_train_1, d_test_1 = train_test_split(client_1, test_size=500)
+        data_train_1 = TabularData(d_train_1[features_1].values, d_train_1[decision_1].values, train=True, download=False, transform=None)
+        test_set_1 = TabularData(d_test_1[features_1].values, d_test_1[decision_1].values, train=False, download=False, transform=None)
+        train_set_1, val_set_1 = torch.utils.data.random_split(data_train_1, [2364, 300])
 
-        return train_set, val_set, test_set
+        d_train_2, d_test_2 = train_test_split(client_2, test_size=500)
+        data_train_2 = TabularData(d_train_2[features_2].values, d_train_2[decision_2].values, train=True, download=False, transform=None)
+        test_set_2 = TabularData(d_test_2[features_2].values, d_test_2[decision_2].values, train=False, download=False, transform=None)
+        train_set_2, val_set_2 = torch.utils.data.random_split(data_train_2, [2208, 300])
+
+        return train_set_1, train_set_2, val_set_1, val_set_2, test_set_1, test_set_2
 
 # This function pulls relevant information about the dataset such as the number of classes, number of samples,
 # and a list of data labels
@@ -125,7 +140,6 @@ def get_num_classes_samples(dataset):
     # Extract labels #
     # ---------------#
     # has handling for if the data is in list form or not
-
     if isinstance(dataset, torch.utils.data.Subset):
         if isinstance(dataset.dataset.targets, list):
             data_labels_list = np.array(dataset.dataset.targets)[dataset.indices]
@@ -233,25 +247,40 @@ def gen_data_split(dataset, num_users, class_partitions):
     return user_data_idx
 
 # This function generates the train/validate/test loaders for each client
-# dataname: name of dataset [can choose from cifar10 or cifar100)
+# dataname: name of dataset [can choose from cifar10, cifar100, compas)
 # data_path: the root path for the data directory
 # num_users: the number of clients
 # bz: the batch size
 # classes_per_user: number of classes assigned to each client
 # returns the train/val/test loaders of each client, so you get a list of pytorch loaders
 def gen_random_loaders(data_name, data_path, num_users, bz, classes_per_user):
-    loader_params = {"batch_size": bz, "shuffle": False, "pin_memory": True, "num_workers": 0}
+    loader_params = {"batch_size": bz, "shuffle": True, "pin_memory": True, "num_workers": 0}
+    loader_params_true = {"batch_size": bz, "shuffle": True, "pin_memory": True, "num_workers": 0}
+    loader_params_false = {"batch_size": bz, "shuffle": False, "pin_memory": True, "num_workers": 0}
+
     dataloaders = []
-    datasets = get_datasets(data_name, data_path, normalize=True)
-    for i, d in enumerate(datasets):
-        # ensure same partition for train/test/val
-        if i == 0:
-            cls_partitions = gen_classes_per_node(d, num_users, classes_per_user)
-            loader_params['shuffle'] = True
-        usr_subset_idx = gen_data_split(d, num_users, cls_partitions)
-        # create subsets for each client
-        subsets = list(map(lambda x: torch.utils.data.Subset(d, x), usr_subset_idx))
-        # create dataloaders from subsets
-        dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params), subsets)))
+    datasets = get_datasets(data_name, data_path, normalize=False, val_size=500)
+
+    if data_name == 'cifar10' or 'cifar100':
+        for i, d in enumerate(datasets):  # train, val, test
+            # ensure same partition for train/test/val
+            if i == 0:
+                cls_partitions = gen_classes_per_node(d, num_users, classes_per_user)
+                loader_params['shuffle'] = True
+            usr_subset_idx = gen_data_split(d, num_users, cls_partitions)
+            # create subsets for each client
+            subsets = list(map(lambda x: torch.utils.data.Subset(d, x), usr_subset_idx))
+            # create dataloaders from subsets
+            dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params), subsets)))
+
+    if data_name == 'COMPAS':
+        dataloaders = []
+        train_set_1, train_set_2, val_set_1, val_set_2, test_set_1, test_set_2 = datasets
+        train_sets = [train_set_1, train_set_2]
+        val_sets = [val_set_1, val_set_2]
+        test_loaders = [test_set_1, test_set_2]
+        dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params_true), train_sets)))
+        dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params_false), val_sets)))
+        dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params_false), test_loaders)))
 
     return dataloaders

@@ -2,7 +2,7 @@ from collections import OrderedDict
 import torch
 import torch.nn.functional as F
 from torch import nn
-from experiments.utils import get_device
+
 
 # This class is the architecture for the CIFAR hypernetwork
 # embedding_dim is default to 12
@@ -16,7 +16,7 @@ class HyperCIFAR(nn.Module):
         self.out_dim = out_dim
         self.hidden_dim = hidden_dim
 
-        # create the number of needed layers, so initial linear, activation functions (ReLU), and the needed hidden
+        # create the number of needed layers, so initial linear, activation functions (ReLU), and the needed to be hidden
         # linear layers
         layers = [
              nn.Linear(embedding_dim, hidden_dim), #[13, 100]
@@ -52,7 +52,7 @@ class HyperCIFAR(nn.Module):
             "fc2.weight": self.fc2_weights(features).view(100, 100),
             "fc2.bias": self.fc2_bias(features).view(-1),
             "out.weight": self.out_weights(features).view(10, 100),
-            "out.bias": self.out_bias(features).view(-1),
+            "out.bias": self.out_bias(features).view(-1)
         })
 
         return weights
@@ -101,7 +101,7 @@ class TargetAndContextCIFAR(nn.Module):
         prediction_vector = torch.cat((prediction_vector, x), dim=1)  # shape = [64, 3104]
 
         # If we just need the context vector for the hypernet
-        if contextonly == True:
+        if contextonly:
             return context_vector, avg_context_vector, prediction_vector
 
         x = nn.functional.relu(self.fc1(prediction_vector))
@@ -113,62 +113,59 @@ class TargetAndContextCIFAR(nn.Module):
 #####################################################################################################################
 # COMPAS NN Models
 class HyperCOMPASNN(nn.Module):
-    def __init__(
-            self, embedding_dim, in_channels=3, out_dim=10, hidden_dim=100, n_hidden=1):
+    def __init__(self, embedding_dim, hidden_dim=64):
         super().__init__()
 
-        self.in_channels = in_channels
-        self.out_dim = out_dim
         self.hidden_dim = hidden_dim
+        self.embedding_dim = embedding_dim
+        n_hidden = 1
 
-        # create the number of needed layers, so initial linear, activation functions (ReLU), and the needed hidden
-        # linear layers
         layers = [
-             nn.Linear(embedding_dim, hidden_dim), #[13, 100]
-             nn.ReLU(inplace=True),
-             nn.Linear(hidden_dim, hidden_dim),
-             nn.ReLU(inplace=True),
-             nn.linear(hidden_dim, 8+13)
+            nn.Linear(embedding_dim, hidden_dim),  # [13, 100]
         ]
+        for _ in range(n_hidden):
+            layers.append(nn.ReLU(inplace=True))
+            layers.append(
+                nn.Linear(hidden_dim, hidden_dim),
+            )
 
-        # create the entire mlp from the above layers
-        self.mlp = nn.Sequential(*layers) #final layer is [100,100]
+        self.mlp = nn.Sequential(*layers)
 
-        # Generating a way to save the weights and biases by creating linear layers of the right size so that they
-        # can be passed to the clients to load into their network
-        self.fc1_weights = nn.Linear(8 + 13, 64)
-        self.fc1_bias = nn.Linear(8, 8)
-        self.fc2_weights = nn.Linear(64, 64)
+        self.fc1_weights = nn.Linear(64, (8+13)*64)
+        self.fc1_bias = nn.Linear(64, 64)
+        self.fc2_weights = nn.Linear(64, 64*64)
         self.fc2_bias = nn.Linear(64, 64)
-        self.fc3_weights = nn.Linear(64, 32)
-        self.fc3_bias = nn.Linear(64, 64)
-        self.fc4_weights = nn.Linear(32, 1)
-        self.fc4_bias = nn.Linear(32, 32)
+        self.fc3_weights = nn.Linear(64, 64*32)
+        self.fc3_bias = nn.Linear(64, 32)
+        self.fc4_weights = nn.Linear(64, 32)
+        self.fc4_bias = nn.Linear(64, 1)
 
     # Do a forward pass
     def forward(self, context_vec):
         context_vec = context_vec.view(1, 13) #[1,13]
 
         # Generate the weight output features by passing the context_vector through the hypernetwork mlp
-        features = self.mlp(context_vec) #[1, 100]
+        features = self.mlp(context_vec) #[1, 64]
 
         weights = OrderedDict({
-            "fc1.weight": self.fc1_weights(features).view(8 + 13, 64),
+            "fc1.weight": self.fc1_weights(features).view(64, 8+13),
             "fc1.bias": self.fc1_bias(features).view(-1),
             "fc2.weight": self.fc2_weights(features).view(64, 64),
             "fc2.bias": self.fc2_bias(features).view(-1),
-            "fc3.weight": self.fc3_weights(features).view(64, 32),
+            "fc3.weight": self.fc3_weights(features).view(32, 64),
             "fc3.bias": self.fc3_bias(features).view(-1),
-            "fc4.weight": self.out_weights(features).view(32, 1),
-            "fc4.bias": self.out_bias(features).view(-1),
+            "fc4.weight": self.fc4_weights(features).view(1, 32),
+            "fc4.bias": self.fc4_bias(features).view(-1)
         })
 
         return weights
 
 class TargetAndContextCOMPASNN(nn.Module):
-    def __init__(self, no_features = 8, hidden_sizes=[64,64,32], dropout_rate = .2, vector_size = 13):
+    def __init__(self, no_features = 8, hidden_sizes=None, dropout_rate = .2, vector_size = 13):
         super(TargetAndContextCOMPASNN, self).__init__()
 
+        if hidden_sizes is None:
+            self.hidden_sizes = [64, 64, 32]
         self.input_size = no_features
         self.dropout_rate = dropout_rate
         self.hidden_size = 200
@@ -183,14 +180,15 @@ class TargetAndContextCOMPASNN(nn.Module):
         self.context_context = nn.Linear(self.hidden_size, self.vector_size)
 
         # Target Network
-        self.fc1 = nn.Linear(self.no_features + self.vector_size, hidden_sizes[0])
+        self.fc1 = nn.Linear(self.input_size + self.vector_size, hidden_sizes[0])
         self.fc2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
         self.fc3 = nn.Linear(hidden_sizes[1], hidden_sizes[2])
         self.fc4 = nn.Linear(hidden_sizes[2], 1)
 
     def forward(self, x, contextonly):
         # pass through context vector
-        x = torch.flatten(x, 1)
+        #x = torch.flatten(x, 1)
+
         hidden1 = self.context_fc1(x)
         relu1 = self.context_relu1(hidden1)
         hidden2 = self.context_fc2(relu1)
@@ -204,13 +202,13 @@ class TargetAndContextCOMPASNN(nn.Module):
         prediction_vector = torch.cat((prediction_vector, x), dim=1)
 
         # If we just need the context vector for the hypernet
-        if contextonly == True:
+        if contextonly:
             return context_vector, avg_context_vector, prediction_vector
 
-        x1 = F.relu(self.fc1(x))
-        x2 = F.relu(self.fc2(x1))
+        x1 = nn.functional.relu(self.fc1(prediction_vector))
+        x2 = nn.functional.relu(self.fc2(x1))
         x3 = self.dropout(x2)
-        x4 = F.relu(self.fc3(x3))
+        x4 = nn.functional.relu(self.fc3(x3))
         x5 = self.dropout(x4)
         y = self.fc4(x5)
         y = torch.sigmoid(y)

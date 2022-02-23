@@ -36,10 +36,10 @@ class NN(nn.Module):
         self.input_size = hidden_sizes[0]
         self.dropout_rate = dropout_rate
 
-        self.fc1 = nn.Linear(self.no_features, hidden_sizes[0])
-        self.fc2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
-        self.fc3 = nn.Linear(hidden_sizes[1], hidden_sizes[2])
-        self.fc4 = nn.Linear(hidden_sizes[2], 1)
+        self.fc1 = nn.Linear(self.no_features, hidden_sizes[0]) #[8, 64]
+        self.fc2 = nn.Linear(hidden_sizes[0], hidden_sizes[1]) #[64, 64]
+        self.fc3 = nn.Linear(hidden_sizes[1], hidden_sizes[2]) #[64, 32]
+        self.fc4 = nn.Linear(hidden_sizes[2], 1) #[32, 1]
 
         self.dropout = nn.Dropout(self.dropout_rate)
 
