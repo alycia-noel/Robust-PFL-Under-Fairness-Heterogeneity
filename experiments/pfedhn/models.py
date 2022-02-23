@@ -214,3 +214,86 @@ class TargetAndContextCOMPASNN(nn.Module):
         y = torch.sigmoid(y)
 
         return y
+
+#####################################################################################################################
+# COMPAS LR Models
+class HyperCOMPASLR(nn.Module):
+    def __init__(self, embedding_dim, hidden_dim=64):
+        super().__init__()
+
+        self.hidden_dim = hidden_dim
+        self.embedding_dim = embedding_dim
+
+        n_hidden = 1
+
+        layers = [
+            nn.Linear(embedding_dim, hidden_dim),  # [13, 100]
+        ]
+        for _ in range(n_hidden):
+            layers.append(nn.ReLU(inplace=True))
+            layers.append(
+                nn.Linear(hidden_dim, hidden_dim),
+            )
+        layers.append(nn.Linear(hidden_dim, 1))
+
+        self.mlp = nn.Sequential(*layers)
+
+        self.fc1_weights = nn.Linear(1, (8+13)) #[input size, 1]
+        self.fc1_bias = nn.Linear(1, 1)
+
+
+    # Do a forward pass
+    def forward(self, context_vec):
+        context_vec = context_vec.view(1, 13) #[1,13]
+
+        # Generate the weight output features by passing the context_vector through the hypernetwork mlp
+        features = self.mlp(context_vec) #[1, 64]
+
+        weights = OrderedDict({
+            "fc1.weight": self.fc1_weights(features).view(1, 8+13),
+            "fc1.bias": self.fc1_bias(features).view(-1),
+        })
+
+        return weights
+
+class TargetAndContextCOMPASLR(nn.Module):
+    def __init__(self, input_size = 8, vector_size = 13):
+        super(TargetAndContextCOMPASLR, self).__init__()
+
+        self.input_size = input_size
+        self.vector_size = vector_size
+        self.hidden_size = 200
+
+        # Context network
+        self.context_fc1 = nn.Linear(self.input_size, self.hidden_size)
+        self.context_relu1 = nn.LeakyReLU()
+        self.context_fc2 = nn.Linear(self.hidden_size, self.hidden_size)
+        self.context_relu2 = nn.LeakyReLU()
+        self.context_context = nn.Linear(self.hidden_size, self.vector_size)
+
+        # Target Network
+        self.fc1 = nn.Linear(self.input_size + self.vector_size, 1)
+
+    def forward(self, x, contextonly):
+        # pass through context vector
+        #x = torch.flatten(x, 1)
+
+        hidden1 = self.context_fc1(x)
+        relu1 = self.context_relu1(hidden1)
+        hidden2 = self.context_fc2(relu1)
+        relu2 = self.context_relu2(hidden2)
+        context_vector = self.context_context(relu2)
+
+        ###### adaptive prediction
+        avg_context_vector = torch.mean(context_vector, dim=0)  # [13]
+
+        prediction_vector = avg_context_vector.expand(len(x), self.vector_size)
+        prediction_vector = torch.cat((prediction_vector, x), dim=1)
+
+        # If we just need the context vector for the hypernet
+        if contextonly:
+            return context_vector, avg_context_vector, prediction_vector
+
+        x1 = self.fc1(prediction_vector)
+        y = torch.sigmoid(x1)
+        return y
