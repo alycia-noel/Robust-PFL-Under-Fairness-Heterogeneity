@@ -18,14 +18,7 @@ import warnings
 torch.autograd.set_detect_anomaly(True)
 warnings.filterwarnings("ignore")
 
-# The function to return the evaluation results of the model to the client.
-# nodes: total number of clients
-# hnet: the hypernetwork model
-# net: the local model
-# criteria: the loss function
-# device: GPU or CPU
-# split: test (but can also be train)
-# return: current_results, average loss, average accuracy, and overall accuracy so far
+
 def eval_model(nodes, num_nodes, hnet, combonet, criteria, device, split):
     curr_results = evaluate(nodes, num_nodes, hnet, combonet, criteria, device, split=split)
     total_correct = sum([val['correct'] for val in curr_results.values()])
@@ -37,7 +30,6 @@ def eval_model(nodes, num_nodes, hnet, combonet, criteria, device, split):
 
     return curr_results, avg_loss, avg_acc, all_acc
 
-# The function to actually evaluate the model (i.e., test because there is no backpropagation)
 @torch.no_grad()
 def evaluate(nodes: BaseNodes, num_nodes, hnet, combonet, criteria, device, split='test'):
     hnet.eval()

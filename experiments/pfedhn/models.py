@@ -238,7 +238,7 @@ class HyperCOMPASLR(nn.Module):
 
         self.mlp = nn.Sequential(*layers)
 
-        self.fc1_weights = nn.Linear(1, (8+11)) #[input size, 1]
+        self.fc1_weights = nn.Linear(1, (11+11)) #[input size, 1]
         self.fc1_bias = nn.Linear(1, 1)
 
 
@@ -250,7 +250,7 @@ class HyperCOMPASLR(nn.Module):
         features = self.mlp(context_vec) #[1, 64]
 
         weights = OrderedDict({
-            "fc1.weight": self.fc1_weights(features).view(1, 8+11),
+            "fc1.weight": self.fc1_weights(features).view(1, 11+11),
             "fc1.bias": self.fc1_bias(features).view(-1),
         })
 
