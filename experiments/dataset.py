@@ -60,16 +60,17 @@ def get_datasets(data_name, dataroot, normalize, val_size):
         df_filtered = df_filtered.loc[df_filtered['score_text'] != 'N/A']
         df_filtered['is_med_or_high_risk'] = (df_filtered['decile_score'] >= 5).astype(int)
         df_filtered['length_of_stay'] = (
-        pd.to_datetime(df_filtered['c_jail_out']) - pd.to_datetime(df_filtered['c_jail_in']))
-        cols = ['sex', 'age', 'race', 'decile_score', 'length_of_stay', 'priors_count', 'c_charge_degree',
-                'two_year_recid', 'is_med_or_high_risk']
+                    pd.to_datetime(df_filtered['c_jail_out']) - pd.to_datetime(df_filtered['c_jail_in']))
+
+        cols = ['age', 'c_charge_degree', 'race', 'age_cat', 'score_text', 'sex', 'priors_count', 'length_of_stay',
+                'days_b_screening_arrest', 'decile_score', 'is_recid', 'two_year_recid']
         compas = df_filtered[cols]
 
         compas['length_of_stay'] /= np.timedelta64(1, 'D')
         compas['length_of_stay'] = np.ceil(compas['length_of_stay'])
 
         encoders = {}
-        for col in ['race', 'sex', 'c_charge_degree']:
+        for col in ['race', 'sex', 'c_charge_degree', 'score_text', 'age_cat']:
             encoders[col] = LabelEncoder().fit(compas[col])
             compas.loc[:, col] = encoders[col].transform(compas[col])
 

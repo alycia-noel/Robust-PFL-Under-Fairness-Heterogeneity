@@ -238,26 +238,26 @@ class HyperCOMPASLR(nn.Module):
 
         self.mlp = nn.Sequential(*layers)
 
-        self.fc1_weights = nn.Linear(1, (8+13)) #[input size, 1]
+        self.fc1_weights = nn.Linear(1, (8+11)) #[input size, 1]
         self.fc1_bias = nn.Linear(1, 1)
 
 
     # Do a forward pass
     def forward(self, context_vec):
-        context_vec = context_vec.view(1, 13) #[1,13]
+        context_vec = context_vec.view(1, 11) #[1,13]
 
         # Generate the weight output features by passing the context_vector through the hypernetwork mlp
         features = self.mlp(context_vec) #[1, 64]
 
         weights = OrderedDict({
-            "fc1.weight": self.fc1_weights(features).view(1, 8+13),
+            "fc1.weight": self.fc1_weights(features).view(1, 8+11),
             "fc1.bias": self.fc1_bias(features).view(-1),
         })
 
         return weights
 
 class TargetAndContextCOMPASLR(nn.Module):
-    def __init__(self, input_size = 8, vector_size = 13):
+    def __init__(self, input_size = 11, vector_size = 11):
         super(TargetAndContextCOMPASLR, self).__init__()
 
         self.input_size = input_size

@@ -79,13 +79,13 @@ def train(data_name: str, num_nodes: int, steps: int, inner_steps: int, device, 
     # init nodes, hnet, local net #
     ###############################
     # generate the clients
-    nodes = BaseNodes(data_name, data_path=None, n_nodes = 2, classes_per_node=1, batch_size=16)
+    nodes = BaseNodes(data_name, data_path=None, n_nodes = 2, classes_per_node=1, batch_size=32)
 
-    embed_dim=13
+    embed_dim=11
 
     # create the hypernet, local, and context network
     hnet = HyperCOMPASLR(embed_dim, hidden_dim=64)
-    combonet = TargetAndContextCOMPASLR(input_size = 8, vector_size = 13)
+    combonet = TargetAndContextCOMPASLR(input_size = 11, vector_size = 11)
 
     # send both of the networks to the GPU
     hnet = hnet.to(device)
