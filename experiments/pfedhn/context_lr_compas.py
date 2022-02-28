@@ -91,6 +91,7 @@ def plot_roc_curves(results, pred_col, resp_col, size=(7, 5), fname=None):
 
 # Import the data and visualize it (if you want using df.info())
 # decile_score = risk score prediction
+torch.manual_seed(0)
 url = 'https://raw.githubusercontent.com/propublica/compas-analysis/master/compas-scores-two-years.csv'
 df = pd.read_csv(url)
 
@@ -142,10 +143,19 @@ no_batches = len(train_loader)
 loss_values =[]
 acc_values = []
 test_acc =[]
+test_err = []
+tp = []
+tn = []
+fp = []
+fn = []
+times = []
+
 # Train model
+
+model.train() #warm-up
+torch.cuda.synchronize()
 for epoch in range(700): #original 250, best:700
-    model.train()
-    start = time.time()
+    start_epoch = time.time()
     running_loss = 0.0
     correct = 0
     total = 0.0
@@ -175,9 +185,13 @@ for epoch in range(700): #original 250, best:700
         plt.ylabel('Loss')
         plt.title('Loss over Epochs for Adaptive LR Model on COMPAS')
         plt.show()
+    torch.cuda.synchronize()
+    end_epoch = time.time()
+    elapsed = end_epoch - start_epoch
+    times.append(elapsed)
+    print('Epoch: {0}/{1};\t Loss: {2:1.3f};\tAcc:{3:1.3f};\tTime:{4:1.2f}'.format(epoch + 1, 700, running_loss / len(train_loader), accuracy, elapsed))
 
-    print('Epoch: {0}/{1};\t Loss: {2:1.3f};\tAcc:{3:1.3f}'.format(epoch + 1, 700, running_loss / len(train_loader), accuracy))
-
+    total_time = sum(times)
 
     # Eval Model
     model.eval()
@@ -193,7 +207,7 @@ for epoch in range(700): #original 250, best:700
     FP = CM[0][1]
 
     accuracy = (TP+TN)/(TP+FP+FN+TN)
-
+    error    = (FP+FN)/(TP+FP+FN+TN)
     res = (
     pd  .DataFrame(columns = features, index = d_test.index)
         .add_suffix('_partial')
@@ -204,10 +218,17 @@ for epoch in range(700): #original 250, best:700
 
     results.append(res)
     test_acc.append(accuracy)
-
+    test_err.append(error)
+    tn.append(TN)
+    tp.append(TP)
+    fn.append(FN)
+    fp.append(FP)
 results = pd.concat(results)
 average_test_acc = sum(test_acc) / len(test_acc)
-print(test_acc[0], test_acc[len(test_acc) - 1], average_test_acc)
+print('Test Accuracy: ',test_acc[0], test_acc[len(test_acc) - 1], average_test_acc)
+print('Test Error: ', test_err[0], test_err[len(test_err) - 1])
+print('Train Time: ', total_time)
+print('TP: ', tp[len(tp)-1], 'TN: ', tn[len(tn)-1], 'FP: ', fp[len(fp)-1], 'FN: ', fn[len(fn)-1])
 for col, encoder in encoders.items():
         results.loc[:,col] = encoder.inverse_transform(results[col])
 
