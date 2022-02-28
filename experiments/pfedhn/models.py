@@ -118,13 +118,13 @@ class HyperCOMPASNN(nn.Module):
 
         self.hidden_dim = hidden_dim
         self.embedding_dim = embedding_dim
-        n_hidden = 1
+        n_hidden = 20
 
         layers = [
             nn.Linear(embedding_dim, hidden_dim),  # [13, 100]
         ]
         for _ in range(n_hidden):
-            layers.append(nn.ReLU(inplace=True))
+            layers.append(nn.LeakyReLU(inplace=True))
             layers.append(
                 nn.Linear(hidden_dim, hidden_dim),
             )
@@ -224,13 +224,13 @@ class HyperCOMPASLR(nn.Module):
         self.hidden_dim = hidden_dim
         self.embedding_dim = embedding_dim
 
-        n_hidden = 1
+        n_hidden = 100
 
         layers = [
             nn.Linear(embedding_dim, hidden_dim),  # [13, 100]
         ]
         for _ in range(n_hidden):
-            layers.append(nn.ReLU(inplace=True))
+            layers.append(nn.LeakyReLU(inplace=True))
             layers.append(
                 nn.Linear(hidden_dim, hidden_dim),
             )
@@ -238,55 +238,52 @@ class HyperCOMPASLR(nn.Module):
 
         self.mlp = nn.Sequential(*layers)
 
-        self.fc1_weights = nn.Linear(1, (11+11)) #[input size, 1]
+        self.fc1_weights = nn.Linear(1, (11+embedding_dim)) #[input size, 1]
         self.fc1_bias = nn.Linear(1, 1)
 
 
     # Do a forward pass
     def forward(self, context_vec):
-        context_vec = context_vec.view(1, 11) #[1,13]
+        context_vec = context_vec.view(1, self.embedding_dim) #[1,13]
 
         # Generate the weight output features by passing the context_vector through the hypernetwork mlp
         features = self.mlp(context_vec) #[1, 64]
 
         weights = OrderedDict({
-            "fc1.weight": self.fc1_weights(features).view(1, 11+11),
+            "fc1.weight": self.fc1_weights(features).view(1, 11+self.embedding_dim),
             "fc1.bias": self.fc1_bias(features).view(-1),
         })
 
         return weights
 
 class TargetAndContextCOMPASLR(nn.Module):
-    def __init__(self, input_size = 11, vector_size = 11):
+    def __init__(self, input_size, vector_size):
         super(TargetAndContextCOMPASLR, self).__init__()
 
         self.input_size = input_size
         self.vector_size = vector_size
-        self.hidden_size = 200
+        self.hidden_size = 110
 
         # Context network
         self.context_fc1 = nn.Linear(self.input_size, self.hidden_size)
         self.context_relu1 = nn.LeakyReLU()
         self.context_fc2 = nn.Linear(self.hidden_size, self.hidden_size)
         self.context_relu2 = nn.LeakyReLU()
-        self.context_context = nn.Linear(self.hidden_size, self.vector_size)
+        self.context_fc3 = nn.Linear(self.hidden_size, self.vector_size)
 
         # Target Network
         self.fc1 = nn.Linear(self.input_size + self.vector_size, 1)
 
     def forward(self, x, contextonly):
-        # pass through context vector
-        #x = torch.flatten(x, 1)
-
+        # Pass through context network
         hidden1 = self.context_fc1(x)
         relu1 = self.context_relu1(hidden1)
         hidden2 = self.context_fc2(relu1)
         relu2 = self.context_relu2(hidden2)
-        context_vector = self.context_context(relu2)
+        context_vector = self.context_fc3(relu2)
 
         ###### adaptive prediction
         avg_context_vector = torch.mean(context_vector, dim=0)  # [13]
-
         prediction_vector = avg_context_vector.expand(len(x), self.vector_size)
         prediction_vector = torch.cat((prediction_vector, x), dim=1)
 

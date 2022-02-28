@@ -15,7 +15,6 @@ from experiments.pfedhn.node import BaseNodes # loads the client generator
 from experiments.utils import get_device, set_logger, set_seed, str2bool # loads extra tools
 
 import warnings
-torch.autograd.set_detect_anomaly(True)
 warnings.filterwarnings("ignore")
 
 
@@ -47,7 +46,7 @@ def evaluate(nodes: BaseNodes, num_nodes, hnet, combonet, criteria, device, spli
 
         for batch_count, batch in enumerate(curr_data):
             img, label = tuple(t.float().to(device) for t in batch)
-            _, avg_context_vector, prediction_vector = combonet(img, contextonly=True)
+            context_vector, avg_context_vector, prediction_vector = combonet(img, contextonly=True)
             weights_1 = hnet(avg_context_vector)
             net_dict = combonet.state_dict()
             hnet_dict = {k: v for k, v in weights_1.items() if k in net_dict}
@@ -76,15 +75,15 @@ def train(data_name: str, num_nodes: int, steps: int, inner_steps: int, device, 
     embed_dim=11
 
     # create the hypernet, local, and context network
-    hnet = HyperCOMPASLR(embed_dim, hidden_dim=64)
-    combonet = TargetAndContextCOMPASLR(input_size = 11, vector_size = 11)
+    hnet = HyperCOMPASLR(embedding_dim= 11, hidden_dim=64)
+    combonet = TargetAndContextCOMPASLR(input_size = 11, vector_size = embed_dim)
 
     # send both of the networks to the GPU
     hnet = hnet.to(device)
     combonet = combonet.to(device)
 
     # setting up optimizers
-    optimizer = torch.optim.Adam(hnet.parameters(), lr=2.e-4, weight_decay=0.)
+    optimizer = torch.optim.Adam(hnet.parameters(), lr=1e-2, weight_decay=1e-3)
 
     # Loss function
     criteria = nn.BCELoss(reduction='mean')  # Binary Cross Entropy loss
@@ -103,11 +102,11 @@ def train(data_name: str, num_nodes: int, steps: int, inner_steps: int, device, 
         # select client at random
         node_id = random.choice(range(num_nodes))
 
-        batch = next(iter(nodes.test_loaders[node_id]))
+        batch = next(iter(nodes.val_loaders[node_id]))
 
-        features, label = tuple(t.float().to(device) for t in batch)
+        features_val, labels_val = tuple(t.float().to(device) for t in batch)
 
-        context_vectors, avg_context_vector, prediction_vector = combonet(features, contextonly=True)
+        context_vectors, avg_context_vector, prediction_vector = combonet(features_val, contextonly=True)
 
         # produce & load local network weights
         weights = hnet(avg_context_vector)
@@ -117,7 +116,7 @@ def train(data_name: str, num_nodes: int, steps: int, inner_steps: int, device, 
         combonet.load_state_dict(net_dict)
 
         # init inner optimizer
-        inner_optim = torch.optim.Adam(combonet.parameters(), lr=5e-3, weight_decay=0)
+        inner_optim = torch.optim.SGD(combonet.parameters(), lr=3e-3, momentum= .9, weight_decay=5e-5)
 
         # storing theta_i for later calculating delta theta
         inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
@@ -125,10 +124,11 @@ def train(data_name: str, num_nodes: int, steps: int, inner_steps: int, device, 
         # NOTE: evaluation on sent model
         with torch.no_grad():
             combonet.eval()
-            pred = combonet(features, contextonly=False)
-            prvs_loss = criteria(pred, label.unsqueeze(1))
-            prvs_acc = pred.argmax(1).eq(label).sum().item() / len(label)
-            combonet.train()
+            pred = combonet(features_val, contextonly=False)
+
+            prvs_loss = criteria(pred, labels_val.unsqueeze(1))
+            prvs_acc = pred.argmax(1).eq(labels_val).sum().item() / len(labels_val)
+
 
         # inner updates -> obtaining theta_tilda
         for i in range(inner_steps):
@@ -138,14 +138,14 @@ def train(data_name: str, num_nodes: int, steps: int, inner_steps: int, device, 
 
             # Create context vector for this batch
             batch = next(iter(nodes.train_loaders[node_id]))
-            features, label = tuple(t.float().to(device) for t in batch)
+            features_train, label_train = tuple(t.float().to(device) for t in batch)
 
-            pred = combonet(features, contextonly=False)
+            pred = combonet(features_train, contextonly=False)
 
-            loss = criteria(pred, label.unsqueeze(1))
+            loss = criteria(pred, label_train.unsqueeze(1))
             loss.backward()
 
-            torch.nn.utils.clip_grad_norm_(combonet.parameters(), 50)
+            #torch.nn.utils.clip_grad_norm_(combonet.parameters(), 50)
 
             inner_optim.step()
 
@@ -169,7 +169,7 @@ def train(data_name: str, num_nodes: int, steps: int, inner_steps: int, device, 
         for p, g in zip(hnet.parameters(), hnet_grads):
             p.grad = g
 
-        torch.nn.utils.clip_grad_norm_(hnet.parameters(), 50)
+        #torch.nn.utils.clip_grad_norm_(hnet.parameters(), 50)
         optimizer.step()
 
         step_iter.set_description(

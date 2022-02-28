@@ -75,6 +75,7 @@ def get_datasets(data_name, dataroot, normalize, val_size):
             compas.loc[:, col] = encoders[col].transform(compas[col])
 
         client_1 = compas[compas['age'] <= 31] #3164
+
         client_2 = compas[compas['age'] > 31] #3008
 
         cols_1 = client_1.columns
@@ -120,18 +121,18 @@ def get_datasets(data_name, dataroot, normalize, val_size):
         return train_set, val_set, test_set
 
     if data_name == 'COMPAS':
-        d_train_1, d_test_1 = train_test_split(client_1, test_size=500)
+        d_train_1, d_test_1 = train_test_split(client_1, test_size=300)
         data_train_1 = TabularData(d_train_1[features_1].values, d_train_1[decision_1].values, train=True, download=False, transform=None)
         test_set_1 = TabularData(d_test_1[features_1].values, d_test_1[decision_1].values, train=False, download=False, transform=None)
-        train_set_1, val_set_1 = torch.utils.data.random_split(data_train_1, [2364, 300])
+        train_set_1, val_set_1 = torch.utils.data.random_split(data_train_1, [2564, 300])#2364, 300]) should be 5172, minused three to test the one client case
 
-        d_train_2, d_test_2 = train_test_split(client_2, test_size=500)
+        d_train_2, d_test_2 = train_test_split(client_2, test_size=300)
         data_train_2 = TabularData(d_train_2[features_2].values, d_train_2[decision_2].values, train=True, download=False, transform=None)
         test_set_2 = TabularData(d_test_2[features_2].values, d_test_2[decision_2].values, train=False, download=False, transform=None)
-        train_set_2, val_set_2 = torch.utils.data.random_split(data_train_2, [2208, 300])
+        train_set_2, val_set_2 = torch.utils.data.random_split(data_train_2, [2408, 300])
 
         return train_set_1, train_set_2, val_set_1, val_set_2, test_set_1, test_set_2
-
+        #return train_set_1, val_set_1, test_set_1
 # This function pulls relevant information about the dataset such as the number of classes, number of samples,
 # and a list of data labels
 # dataset: the pytorch dataset object
@@ -255,6 +256,7 @@ def gen_data_split(dataset, num_users, class_partitions):
 # classes_per_user: number of classes assigned to each client
 # returns the train/val/test loaders of each client, so you get a list of pytorch loaders
 def gen_random_loaders(data_name, data_path, num_users, bz, classes_per_user):
+    bz = 32
     loader_params = {"batch_size": bz, "shuffle": True, "pin_memory": True, "num_workers": 0}
     loader_params_true = {"batch_size": bz, "shuffle": True, "pin_memory": True, "num_workers": 0}
     loader_params_false = {"batch_size": bz, "shuffle": False, "pin_memory": True, "num_workers": 0}
@@ -262,21 +264,23 @@ def gen_random_loaders(data_name, data_path, num_users, bz, classes_per_user):
     dataloaders = []
     datasets = get_datasets(data_name, data_path, normalize=False, val_size=500)
 
-    if data_name == 'cifar10' or 'cifar100':
-        for i, d in enumerate(datasets):  # train, val, test
-            # ensure same partition for train/test/val
-            if i == 0:
-                cls_partitions = gen_classes_per_node(d, num_users, classes_per_user)
-                loader_params['shuffle'] = True
-            usr_subset_idx = gen_data_split(d, num_users, cls_partitions)
-            # create subsets for each client
-            subsets = list(map(lambda x: torch.utils.data.Subset(d, x), usr_subset_idx))
-            # create dataloaders from subsets
-            dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params), subsets)))
+    # if data_name == 'cifar10' or 'cifar100':
+    #     datasets = get_datasets(data_name, data_path, normalize=False, val_size=500)
+    #     for i, d in enumerate(datasets):  # train, val, test
+    #         # ensure same partition for train/test/val
+    #         if i == 0:
+    #             cls_partitions = gen_classes_per_node(d, num_users, classes_per_user)
+    #             loader_params['shuffle'] = True
+    #         usr_subset_idx = gen_data_split(d, num_users, cls_partitions)
+    #         # create subsets for each client
+    #         subsets = list(map(lambda x: torch.utils.data.Subset(d, x), usr_subset_idx))
+    #         # create dataloaders from subsets
+    #         dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params), subsets)))
 
     if data_name == 'COMPAS':
         dataloaders = []
         train_set_1, train_set_2, val_set_1, val_set_2, test_set_1, test_set_2 = datasets
+        #train_set_1, val_set_1, test_set_1 = datasets
         train_sets = [train_set_1, train_set_2]
         val_sets = [val_set_1, val_set_2]
         test_loaders = [test_set_1, test_set_2]
@@ -284,4 +288,7 @@ def gen_random_loaders(data_name, data_path, num_users, bz, classes_per_user):
         dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params_false), val_sets)))
         dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params_false), test_loaders)))
 
+        # dataloaders.append(torch.utils.data.DataLoader(train_set_1, **loader_params_true))
+        # dataloaders.append(torch.utils.data.DataLoader(val_set_1, **loader_params_false))
+        # dataloaders.append(torch.utils.data.DataLoader(test_set_1, **loader_params_false))
     return dataloaders
