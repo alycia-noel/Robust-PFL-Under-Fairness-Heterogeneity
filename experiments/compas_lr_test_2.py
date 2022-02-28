@@ -185,4 +185,4 @@ for col, encoder in encoders.items():
         results.loc[:,col] = encoder.inverse_transform(results[col])
 
 
-plot_roc_curves(results, 'prediction', 'two_year_recid', size=(5, 3), fname='./results/roc.png')
+plot_roc_curves(results, 'prediction', 'two_year_recid', size=(7, 5), fname='./results/roc.png')
