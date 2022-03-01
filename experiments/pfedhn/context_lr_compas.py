@@ -135,15 +135,15 @@ model = model.double()
 train_loader = DataLoader(data_train, shuffle = True, batch_size = 32)
 test_loader = DataLoader(data_test, shuffle = False, batch_size= 32)
 
-#optimizer = torch.optim.Adam(model.parameters(), lr = 2.e-4, weight_decay = 0.)
 optimizer = torch.optim.SGD(model.parameters(), lr=3.e-4, momentum=.5, weight_decay=3.e-5) #best: 3.e-4, .5, 3.e-5,   3e-3 is the original lr, momentum = .5 and .4 (more like what we want, still kind of jagged), .9 (too high, really wack loss), wd=5e-5
 
 loss = nn.BCELoss(reduction='mean')   #binary logarithmic loss function
 no_batches = len(train_loader)
 loss_values =[]
+test_loss_values = []
 acc_values = []
 test_acc =[]
-test_err = []
+test_error = []
 tp = []
 tn = []
 fp = []
@@ -178,13 +178,6 @@ for epoch in range(700): #original 250, best:700
     acc_values.append(accuracy)
     loss_values.append(running_loss / len(train_loader))
 
-    if epoch == 699 or (epoch % 99 == 0 and epoch != 0):
-        plt.plot(loss_values)
-        #plt.plot(acc_values)
-        plt.xlabel('Epoch')
-        plt.ylabel('Loss')
-        plt.title('Loss over Epochs for Adaptive LR Model on COMPAS')
-        plt.show()
     torch.cuda.synchronize()
     end_epoch = time.time()
     elapsed = end_epoch - start_epoch
@@ -195,10 +188,28 @@ for epoch in range(700): #original 250, best:700
 
     # Eval Model
     model.eval()
+    predictions = []
+    running_loss_test = 0
     with torch.no_grad():
-        y_ = model(data_test.X)
-        y_ = y_.flatten().numpy()
-    my_rounded_list = [round(elem) for elem in y_]
+        for i, (x, y) in enumerate(test_loader):
+            pred = model(x)
+            predictions.extend(pred.flatten().numpy())
+            test_err = loss(pred.flatten(), y)
+            test_err = test_err.mean()
+            running_loss_test += test_err.item() * x.size(0)
+
+    test_loss_values.append(running_loss_test / len(test_loader))
+
+    if epoch == 699 or (epoch % 99 == 0 and epoch != 0):
+        plt.plot(loss_values, label='Train Loss')
+        plt.plot(test_loss_values, label='Test Loss')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Loss over Epochs for Adaptive LR Model on COMPAS')
+        plt.legend(loc="upper right")
+        plt.show()
+
+    my_rounded_list = [round(elem) for elem in predictions]
     CM = confusion_matrix(data_test.y, my_rounded_list)
 
     TN = CM[0][0]
@@ -212,13 +223,13 @@ for epoch in range(700): #original 250, best:700
     pd  .DataFrame(columns = features, index = d_test.index)
         .add_suffix('_partial')
         .join(d_test)
-        .assign(prediction=y_)
+        .assign(prediction=predictions)
         .assign(round=epoch)
     )
 
     results.append(res)
     test_acc.append(accuracy)
-    test_err.append(error)
+    test_error.append(error)
     tn.append(TN)
     tp.append(TP)
     fn.append(FN)
@@ -226,7 +237,7 @@ for epoch in range(700): #original 250, best:700
 results = pd.concat(results)
 average_test_acc = sum(test_acc) / len(test_acc)
 print('Test Accuracy: ',test_acc[0], test_acc[len(test_acc) - 1], average_test_acc)
-print('Test Error: ', test_err[0], test_err[len(test_err) - 1])
+print('Test Error: ', test_error[0], test_error[len(test_error) - 1])
 print('Train Time: ', total_time)
 print('TP: ', tp[len(tp)-1], 'TN: ', tn[len(tn)-1], 'FP: ', fp[len(fp)-1], 'FN: ', fn[len(fn)-1])
 for col, encoder in encoders.items():
