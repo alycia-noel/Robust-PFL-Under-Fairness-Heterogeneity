@@ -29,20 +29,42 @@ class TabularData(Dataset):
         return self.X[idx], self.y[idx]
 
 class NN(nn.Module):
-    def __init__(self, input_size, hidden_sizes=[64,64,32], dropout_rate = .35):
+    def __init__(self, input_size,vector_size, hidden_sizes=[64,64,32]):
         super(NN, self).__init__()
         self.input_size = input_size
-        self.dropout_rate = dropout_rate
+        self.vector_size = vector_size
+        self.dropout_rate = .35
+        self.hidden_size = 110
 
-        self.fc1 = nn.Linear(self.input_size, hidden_sizes[0])
+        # neural network
+        self.fc1 = nn.Linear(self.input_size+self.vector_size, hidden_sizes[0])
         self.fc2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
         self.fc3 = nn.Linear(hidden_sizes[1], hidden_sizes[2])
         self.fc4 = nn.Linear(hidden_sizes[2], 1)
 
         self.dropout = nn.Dropout(self.dropout_rate)
 
-    def forward(self, data):
-        x1 = F.relu(self.fc1(data))
+        # Context Network
+        self.context_fc1 = nn.Linear(self.input_size, self.hidden_size)
+        self.context_relu1 = nn.LeakyReLU()
+        self.context_fc2 = nn.Linear(self.hidden_size, self.hidden_size)
+        self.context_relu2 = nn.LeakyReLU()
+        self.context_fc3 = nn.Linear(self.hidden_size, self.vector_size)
+
+    def forward(self, x):
+        # Pass through context network
+        hidden1 = self.context_fc1(x)
+        relu1 = self.context_relu1(hidden1)
+        hidden2 = self.context_fc2(relu1)
+        relu2 = self.context_relu2(hidden2)
+        context_vector = self.context_fc3(relu2)
+
+        ###### adaptive prediction
+        avg_context_vector = torch.mean(context_vector, dim=0)
+        prediction_vector = avg_context_vector.expand(len(x), self.vector_size)
+        prediction_vector = torch.cat((prediction_vector, x), dim=1)
+
+        x1 = F.relu(self.fc1(prediction_vector))
         x2 = F.relu(self.fc2(x1))
         x3 = self.dropout(x2)
         x4 = F.relu(self.fc3(x3))
@@ -73,7 +95,7 @@ def plot_roc_curves(results, pred_col, resp_col, size=(7, 5), fname=None):
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
     plt.legend(loc="lower right")
-    plt.title('ROC for NN on COMPAS')
+    plt.title('ROC for Adaptive NN on COMPAS')
     #if fname is not None:
     #    plt.savefig(fname)
     #else:
@@ -114,22 +136,21 @@ for col in ['race', 'sex', 'c_charge_degree', 'score_text', 'age_cat']:
 
 results = []
 
-d_train, d_test = train_test_split(compas, test_size=500)
 
+d_train, d_test = train_test_split(compas, test_size=500)
 data_train = TabularData(d_train[features].values, d_train[decision].values)
 data_test = TabularData(d_test[features].values, d_test[decision].values)
 
-model = NN(input_size=11)
+model = NN(input_size=11, vector_size=11)
 model = model.double()
 
 train_loader = DataLoader(data_train, shuffle = True, batch_size = 16)
 test_loader = DataLoader(data_test, shuffle = False, batch_size= 16)
 
 optimizer = torch.optim.SGD(model.parameters(), lr=1.e-4, momentum=.97, weight_decay=1.e-5)
-#optimizer = torch.optim.Adam(model.parameters(), lr = 2.e-4, weight_decay = 0)
-loss = nn.BCELoss(reduction='none') #Binary Cross Entropy loss
+loss = nn.BCELoss(reduction='mean')   #binary logarithmic loss function
 no_batches = len(train_loader)
-loss_values = []
+loss_values =[]
 test_loss_values = []
 acc_values = []
 test_acc =[]
@@ -141,12 +162,13 @@ fn = []
 times = []
 
 # Train model
-model.train()
+
+model.train() #warm-up
 torch.cuda.synchronize()
-for epoch in range(100):
-    start = time.time()
+for epoch in range(100): #original 250, best:700
+    start_epoch = time.time()
     running_loss = 0.0
-    correct = 0.0
+    correct = 0
     total = 0.0
     for i, (x, y) in enumerate(train_loader):
         optimizer.zero_grad()
@@ -164,11 +186,12 @@ for epoch in range(100):
                 correct = correct + 1
 
     accuracy = (100 * correct / len(data_train))
+    acc_values.append(accuracy)
     loss_values.append(running_loss / len(train_loader))
 
     torch.cuda.synchronize()
-    end = time.time()
-    elapsed = end - start
+    end_epoch = time.time()
+    elapsed = end_epoch - start_epoch
     times.append(elapsed)
     print('Epoch: {0}/{1};\t Loss: {2:1.3f};\tAcc:{3:1.3f};\tTime:{4:1.2f}'.format(epoch + 1, 100, running_loss / len(train_loader), accuracy, elapsed))
 
@@ -188,16 +211,14 @@ for epoch in range(100):
 
     test_loss_values.append(running_loss_test / len(test_loader))
 
-
     if epoch == 99 or (epoch % 49 == 0 and epoch != 0):
         plt.plot(loss_values, label='Train Loss')
         plt.plot(test_loss_values, label='Test Loss')
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
-        plt.title('Loss over Epochs for NN Model on COMPAS')
+        plt.title('Loss over Epochs for Adaptive NN Model on COMPAS')
         plt.legend(loc="upper right")
         plt.show()
-        # if i % 354 == 0:
 
     my_rounded_list = [round(elem) for elem in predictions]
     CM = confusion_matrix(data_test.y, my_rounded_list)
@@ -207,14 +228,14 @@ for epoch in range(100):
     TP = CM[1][1]
     FP = CM[0][1]
 
-    accuracy = (TP + TN) / (TP + FP + FN + TN)
-    error = (FP + FN) / (TP + FP + FN + TN)
+    accuracy = (TP+TN)/(TP+FP+FN+TN)
+    error    = (FP+FN)/(TP+FP+FN+TN)
     res = (
-        pd  .DataFrame(columns = features, index = d_test.index)
-            .add_suffix('_partial')
-            .join(d_test)
-            .assign(prediction=predictions)
-            .assign(round=epoch)
+    pd  .DataFrame(columns = features, index = d_test.index)
+        .add_suffix('_partial')
+        .join(d_test)
+        .assign(prediction=predictions)
+        .assign(round=epoch)
     )
 
     results.append(res)
@@ -224,10 +245,8 @@ for epoch in range(100):
     tp.append(TP)
     fn.append(FN)
     fp.append(FP)
-
 results = pd.concat(results)
 average_test_acc = sum(test_acc) / len(test_acc)
-print(test_acc, test_acc[0], test_acc[len(test_acc) - 1], )
 print('Test Accuracy: ',test_acc[0], test_acc[len(test_acc) - 1], average_test_acc)
 print('Test Error: ', test_error[0], test_error[len(test_error) - 1])
 print('Train Time: ', total_time)
