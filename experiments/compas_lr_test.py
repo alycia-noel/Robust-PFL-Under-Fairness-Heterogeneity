@@ -9,7 +9,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
-from sklearn.metrics import roc_curve, auc
+from sklearn.metrics import roc_curve, auc, confusion_matrix
 
 warnings.filterwarnings("ignore")
 
@@ -61,6 +61,7 @@ def plot_roc_curves(results, pred_col, resp_col, size=(7, 5), fname=None):
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
     plt.legend(loc="lower right")
+    plt.title('ROC for LR on COMPAS')
     #if fname is not None:
     #    plt.savefig(fname)
     #else:
@@ -84,8 +85,9 @@ df_filtered = df_filtered.loc[df_filtered['score_text'] != 'N/A']
 df_filtered['is_med_or_high_risk']  = (df_filtered['decile_score']>=5).astype(int)
 df_filtered['length_of_stay'] = (pd.to_datetime(df_filtered['c_jail_out']) - pd.to_datetime(df_filtered['c_jail_in']))
 
-cols = ['sex', 'age', 'race', 'decile_score', 'length_of_stay', 'priors_count', 'c_charge_degree', 'two_year_recid', 'is_med_or_high_risk']
+cols = ['age', 'c_charge_degree', 'race', 'age_cat', 'score_text', 'sex', 'priors_count', 'length_of_stay','days_b_screening_arrest', 'decile_score', 'is_recid', 'two_year_recid']
 compas = df_filtered[cols]
+
 compas['length_of_stay'] /= np.timedelta64(1, 'D')
 compas['length_of_stay'] = np.ceil(compas['length_of_stay'])
 
@@ -93,7 +95,7 @@ cols = compas.columns
 features, decision = cols[:-1], cols[-1]
 
 encoders = {}
-for col in ['race', 'sex', 'c_charge_degree']:
+for col in ['race', 'sex', 'c_charge_degree', 'score_text', 'age_cat']:
     encoders[col] = LabelEncoder().fit(compas[col])
     compas.loc[:, col] = encoders[col].transform(compas[col])
 
@@ -104,19 +106,30 @@ d_train, d_test = train_test_split(compas, test_size=500)
 data_train = TabularData(d_train[features].values, d_train[decision].values)
 data_test = TabularData(d_test[features].values, d_test[decision].values)
 
-model = LR(input_size=8)
+model = LR(input_size=11)
 model = model.double()
 
-train_loader = DataLoader(data_train, shuffle = True, batch_size = 16)
-test_loader = DataLoader(data_test, shuffle = False, batch_size= 16)
+train_loader = DataLoader(data_train, shuffle = True, batch_size = 32)
+test_loader = DataLoader(data_test, shuffle = False, batch_size= 32)
 
-optimizer = torch.optim.Adam(model.parameters(), lr = 2.e-4, weight_decay = 0.)
-loss = nn.BCELoss(reduction='none')
+#optimizer = torch.optim.Adam(model.parameters(), lr = 2.e-4, weight_decay = 0.)
+optimizer = torch.optim.SGD(model.parameters(), lr=3.e-4, momentum=.5, weight_decay=3.e-5)
+loss = nn.BCELoss(reduction='none')   #binary logarithmic loss function
 no_batches = len(train_loader)
 loss_values =[]
+acc_values = []
+test_acc =[]
+test_err = []
+tp = []
+tn = []
+fp = []
+fn = []
+times = []
 
 # Train model
-for epoch in range(250):
+model.train() #warm-up
+torch.cuda.synchronize()
+for epoch in range(700):
     start = time.time()
     running_loss = 0.0
     correct = 0.0
@@ -131,40 +144,70 @@ for epoch in range(250):
         optimizer.step()
 
         classes = torch.argmax(y_, dim=1)
-        correct += torch.mean((classes == y).float())
 
-    accuracy = (100 * correct / len(train_loader))
+        for i in classes:
+            if float(classes[i].item()) == y[i].item():
+                correct = correct + 1
+
+
+    accuracy = (100 * correct / len(data_train))
+    acc_values.append(accuracy)
     loss_values.append(running_loss / len(train_loader))
 
-    if epoch == 249 or (epoch % 50 == 0 and epoch != 0):
+    if epoch == 699 or (epoch % 99 == 0 and epoch != 0):
         plt.plot(loss_values)
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
-        plt.title('Loss over Epochs for LR Model')
+        plt.title('Loss over Epochs for LR Model on COMPAS')
         plt.show()
+    torch.cuda.synchronize()
+    end = time.time()
+    elapsed = end - start
+    times.append(elapsed)
+    print('Epoch: {0}/{1};\t Loss: {2:1.3f};\tAcc:{3:1.3f};\tTime:{4:1.2f}'.format(epoch + 1, 700, running_loss / len(train_loader), accuracy, elapsed))
 
-    print('Epoch: {0}/{1};\t Err: {2:1.3f};\tAcc:{3:1.3f}'.format(epoch + 1, 250, err.item(), accuracy))
+    total_time = sum(times)
 
+    # Eval Model
+    model.eval()
+    with torch.no_grad():
+        y_ = model(data_test.X)
+        y_ = y_.flatten().numpy()
+    my_rounded_list = [round(elem) for elem in y_]
+    CM = confusion_matrix(data_test.y, my_rounded_list)
 
-# Eval Model
-model.eval()
-with torch.no_grad():
-    y_ = model(data_test.X)
-    y_ = y_.flatten().numpy()
+    TN = CM[0][0]
+    FN = CM[1][0]
+    TP = CM[1][1]
+    FP = CM[0][1]
 
-res = (
+    accuracy = (TP+TN)/(TP+FP+FN+TN)
+    error = (FP + FN) / (TP + FP + FN + TN)
+    res = (
     pd  .DataFrame(columns = features, index = d_test.index)
         .add_suffix('_partial')
         .join(d_test)
         .assign(prediction=y_)
-        .assign(round=i)
-)
+        .assign(round=epoch)
+    )
 
-results.append(res)
+    results.append(res)
+    test_acc.append(accuracy)
+    test_err.append(error)
+    tn.append(TN)
+    tp.append(TP)
+    fn.append(FN)
+    fp.append(FP)
 
 results = pd.concat(results)
+average_test_acc = sum(test_acc) / len(test_acc)
+print(test_acc, test_acc[0], test_acc[len(test_acc) - 1], )
+print('Test Accuracy: ',test_acc[0], test_acc[len(test_acc) - 1], average_test_acc)
+print('Test Error: ', test_err[0], test_err[len(test_err) - 1])
+print('Train Time: ', total_time)
+print('TP: ', tp[len(tp)-1], 'TN: ', tn[len(tn)-1], 'FP: ', fp[len(fp)-1], 'FN: ', fn[len(fn)-1])
 for col, encoder in encoders.items():
         results.loc[:,col] = encoder.inverse_transform(results[col])
 
 
-plot_roc_curves(results, 'prediction', 'two_year_recid', size=(5, 3), fname='./results/roc.png')
+plot_roc_curves(results, 'prediction', 'two_year_recid', size=(7, 5), fname='./results/roc.png')

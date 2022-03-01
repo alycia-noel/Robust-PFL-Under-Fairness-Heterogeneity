@@ -1,8 +1,0 @@
-COMPAS (full data set, 1-client):
-    MODEL       BEST ACC    ERROR         LR      Momen.      WD      BS      EPOCH     TP      FP      TN      FN      AUROC       TRAIN TIME
-    LR     :
-    NN     :
-    LR+C   :   .98+-.01   .016+-.02      3.e-4     .5        3.e-5    32       700     232      16      252     0      .99+-.02       201 s
-    NN+C   :
-    LR+C+HN:
-    NN+C+HN:
