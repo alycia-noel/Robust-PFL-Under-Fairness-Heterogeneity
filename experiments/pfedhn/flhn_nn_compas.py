@@ -34,10 +34,17 @@ class combo(nn.Module):
         super(combo, self).__init__()
         self.input_size = input_size
         self.vector_size = vector_size
+        self.hidden_sizes = [64,64,32]
         self.hidden_size = 110
+        self.dropout_rate = .35
 
         # Logistic Regression
-        self.fc1 = nn.Linear(self.input_size + self.vector_size, 1)
+        self.fc1 = nn.Linear(self.input_size + self.vector_size, self.hidden_sizes[0])
+        self.fc2 = nn.Linear(self.hidden_sizes[0], self.hidden_sizes[1])
+        self.fc3 = nn.Linear(self.hidden_sizes[1], self.hidden_sizes[2])
+        self.fc4 = nn.Linear(self.hidden_sizes[2], 1)
+
+        self.dropout = nn.Dropout(self.dropout_rate)
 
         # Context Network
         self.context_fc1 = nn.Linear(self.input_size, self.hidden_size)
@@ -62,9 +69,15 @@ class combo(nn.Module):
         if context_only:
             return context_vector, avg_context_vector, prediction_vector
 
-        x1 = self.fc1(prediction_vector)
-        y = torch.sigmoid(x1)
-        return y
+        x1 = F.relu(self.fc1(prediction_vector))
+        x2 = F.relu(self.fc2(x1))
+        x3 = self.dropout(x2)
+        x4 = F.relu(self.fc3(x3))
+        x5 = self.dropout(x4)
+        x6 = self.fc4(x5)
+        out = torch.sigmoid(x6)
+
+        return out
 
 class HyperNet(nn.Module):
     def __init__(self, vector_size, hidden_dim):
@@ -83,12 +96,18 @@ class HyperNet(nn.Module):
             layers.append(
                 nn.Linear(hidden_dim, hidden_dim)
             )
-        layers.append(nn.Linear(hidden_dim, 22))
+        layers.append(nn.Linear(hidden_dim, 64))
 
         self.mlp = nn.Sequential(*layers)
 
-        self.fc1_weights = nn.Linear((2*self.vector_size), (2*self.vector_size)) #[input size, 1]
-        self.fc1_bias = nn.Linear(2*self.vector_size, 1)
+        self.fc1_weights = nn.Linear(64, 64*22) #[22, 64]
+        self.fc1_bias = nn.Linear(64, 64)
+        self.fc2_weights = nn.Linear(64, 64*64)
+        self.fc2_bias = nn.Linear(64, 64)
+        self.fc3_weights = nn.Linear(64, 64*32)
+        self.fc3_bias = nn.Linear(64, 32)
+        self.fc4_weights = nn.Linear(64, 32)
+        self.fc4_bias = nn.Linear(64, 1)
 
 
     # Do a forward pass
@@ -99,8 +118,14 @@ class HyperNet(nn.Module):
         features = self.mlp(context_vec)
 
         weights = OrderedDict({
-            "fc1.weight": self.fc1_weights(features).view(1,2*self.vector_size),
+            "fc1.weight": self.fc1_weights(features).view(64, 22),
             "fc1.bias": self.fc1_bias(features).view(-1),
+            "fc2.weight": self.fc2_weights(features).view(64, 64),
+            "fc2.bias": self.fc2_bias(features).view(-1),
+            "fc3.weight": self.fc3_weights(features).view(32, 64),
+            "fc3.bias": self.fc3_bias(features).view(-1),
+            "fc4.weight": self.fc4_weights(features).view(1, 32),
+            "fc4.bias": self.fc4_bias(features).view(-1)
         })
 
         return weights
@@ -125,7 +150,7 @@ def plot_roc_curves(results, pred_col, resp_col, size=(7, 5), fname=None):
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
     plt.legend(loc="lower right")
-    plt.title('ROC for FL HN Adaptive LR on COMPAS')
+    plt.title('ROC for FL HN Adaptive NN on COMPAS')
     #if fname is not None:
     #    plt.savefig(fname)
     #else:
@@ -182,13 +207,13 @@ device = torch.device(f"cuda:{gpus}" if torch.cuda.is_available() and not no_cud
 hnet=hnet.to(device)
 model=model.to(device)
 
-optimizer = torch.optim.Adam(hnet.parameters(), lr=2e-2, weight_decay=1e-3)
-inner_optimizer = torch.optim.SGD(model.parameters(), lr=3.e-4, momentum=.5, weight_decay=3.e-5) #best: 3.e-4, .5, 3.e-5,   3e-3 is the original lr, momentum = .5 and .4 (more like what we want, still kind of jagged), .9 (too high, really wack loss), wd=5e-5
-
+optimizer = torch.optim.Adam(hnet.parameters(), lr=1e-3, weight_decay=1e-5) #1e-3 is the original
+inner_optimizer = torch.optim.SGD(model.parameters(), lr=1.e-4, momentum=.97, weight_decay=1.e-5)
+#optimizer = torch.optim.SGD(model.parameters(), lr=1.e-4, momentum=.97, weight_decay=1.e-5)
 loss = nn.BCELoss(reduction='mean')   #binary logarithmic loss function
 
-train_loader = DataLoader(data_train, shuffle = True, batch_size = 32)
-test_loader = DataLoader(data_test, shuffle = False, batch_size= 32)
+train_loader = DataLoader(data_train, shuffle = True, batch_size = 16)
+test_loader = DataLoader(data_test, shuffle = False, batch_size= 16)
 
 no_batches = len(train_loader)
 loss_values =[]
@@ -203,8 +228,8 @@ fn = []
 times = []
 
 # Train model
-steps = 10
-epochs = 70
+steps = 15 #10
+epochs = 15 #20
 place = 0
 torch.cuda.synchronize()
 for step in range(steps):
@@ -272,12 +297,12 @@ for step in range(steps):
 
         test_loss_values.append(running_loss_test / len(test_loader))
 
-        if epoch == epochs - 1:
+        if epoch == epochs-1:
             plt.plot(loss_values, label='Train Loss')
             plt.plot(test_loss_values, label='Test Loss')
             plt.xlabel('Epoch')
             plt.ylabel('Loss')
-            plt.title('Loss over Epochs for FL HN Adaptive LR Model on COMPAS')
+            plt.title('Loss over Epochs for FL HN Adaptive NN Model on COMPAS')
             plt.legend(loc="upper right")
             plt.show()
 

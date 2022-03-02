@@ -37,10 +37,10 @@ class NN(nn.Module):
         self.hidden_size = 110
 
         # neural network
-        self.fc1 = nn.Linear(self.input_size+self.vector_size, hidden_sizes[0])
-        self.fc2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
-        self.fc3 = nn.Linear(hidden_sizes[1], hidden_sizes[2])
-        self.fc4 = nn.Linear(hidden_sizes[2], 1)
+        self.fc1 = nn.Linear(self.input_size+self.vector_size, hidden_sizes[0]) #[22,64]
+        self.fc2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])#[64,64]
+        self.fc3 = nn.Linear(hidden_sizes[1], hidden_sizes[2])#[64,32]
+        self.fc4 = nn.Linear(hidden_sizes[2], 1)#[32,1]
 
         self.dropout = nn.Dropout(self.dropout_rate)
 
