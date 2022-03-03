@@ -33,7 +33,7 @@ class LR(nn.Module):
         super(LR, self).__init__()
         self.input_size = input_size
         self.vector_size = vector_size
-        self.hidden_size = 110
+        self.hidden_size = 11
 
         # Logistic Regression
         self.fc1 = nn.Linear(self.input_size + self.vector_size, 1)

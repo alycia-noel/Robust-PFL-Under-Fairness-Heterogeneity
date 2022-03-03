@@ -34,15 +34,15 @@ class combo(nn.Module):
         super(combo, self).__init__()
         self.input_size = input_size
         self.vector_size = vector_size
-        self.hidden_sizes = [64,64,32]
-        self.hidden_size = 110
-        self.dropout_rate = .35
+        self.hidden_sizes = [64,9,9]
+        self.hidden_size = 11
+        self.dropout_rate = .8
 
         # Logistic Regression
-        self.fc1 = nn.Linear(self.input_size + self.vector_size, self.hidden_sizes[0])
-        self.fc2 = nn.Linear(self.hidden_sizes[0], self.hidden_sizes[1])
-        self.fc3 = nn.Linear(self.hidden_sizes[1], self.hidden_sizes[2])
-        self.fc4 = nn.Linear(self.hidden_sizes[2], 1)
+        self.fc1 = nn.Linear(self.input_size + self.vector_size, self.hidden_sizes[1])
+        self.fc2 = nn.Linear(self.hidden_sizes[1], self.hidden_sizes[1])
+        self.fc3 = nn.Linear(self.hidden_sizes[1], self.hidden_sizes[1])
+        self.fc4 = nn.Linear(self.hidden_sizes[1], 1)
 
         self.dropout = nn.Dropout(self.dropout_rate)
 
@@ -70,11 +70,12 @@ class combo(nn.Module):
             return context_vector, avg_context_vector, prediction_vector
 
         x1 = F.relu(self.fc1(prediction_vector))
-        x2 = F.relu(self.fc2(x1))
-        x3 = self.dropout(x2)
+        x2 = self.dropout(x1)
+        x3 = F.relu(self.fc2(x2))
+        # x3 = self.dropout(x2)
         x4 = F.relu(self.fc3(x3))
-        x5 = self.dropout(x4)
-        x6 = self.fc4(x5)
+        # x5 = self.dropout(x4)
+        x6 = self.fc4(x4)
         out = torch.sigmoid(x6)
 
         return out
@@ -96,18 +97,18 @@ class HyperNet(nn.Module):
             layers.append(
                 nn.Linear(hidden_dim, hidden_dim)
             )
-        layers.append(nn.Linear(hidden_dim, 64))
+        layers.append(nn.Linear(hidden_dim, 22))
 
         self.mlp = nn.Sequential(*layers)
 
-        self.fc1_weights = nn.Linear(64, 64*22) #[22, 64]
-        self.fc1_bias = nn.Linear(64, 64)
-        self.fc2_weights = nn.Linear(64, 64*64)
-        self.fc2_bias = nn.Linear(64, 64)
-        self.fc3_weights = nn.Linear(64, 64*32)
-        self.fc3_bias = nn.Linear(64, 32)
-        self.fc4_weights = nn.Linear(64, 32)
-        self.fc4_bias = nn.Linear(64, 1)
+        self.fc1_weights = nn.Linear(22, 22*9) #[22, 64]
+        self.fc1_bias = nn.Linear(22, 9)
+        self.fc2_weights = nn.Linear(22, 9*9)
+        self.fc2_bias = nn.Linear(22, 9)
+        self.fc3_weights = nn.Linear(22, 9*9)
+        self.fc3_bias = nn.Linear(22, 9)
+        self.fc4_weights = nn.Linear(22, 9)
+        self.fc4_bias = nn.Linear(22, 1)
 
 
     # Do a forward pass
@@ -118,13 +119,13 @@ class HyperNet(nn.Module):
         features = self.mlp(context_vec)
 
         weights = OrderedDict({
-            "fc1.weight": self.fc1_weights(features).view(64, 22),
+            "fc1.weight": self.fc1_weights(features).view(9, 22),
             "fc1.bias": self.fc1_bias(features).view(-1),
-            "fc2.weight": self.fc2_weights(features).view(64, 64),
+            "fc2.weight": self.fc2_weights(features).view(9, 9),
             "fc2.bias": self.fc2_bias(features).view(-1),
-            "fc3.weight": self.fc3_weights(features).view(32, 64),
+            "fc3.weight": self.fc3_weights(features).view(9, 9),
             "fc3.bias": self.fc3_bias(features).view(-1),
-            "fc4.weight": self.fc4_weights(features).view(1, 32),
+            "fc4.weight": self.fc4_weights(features).view(1, 9),
             "fc4.bias": self.fc4_bias(features).view(-1)
         })
 
@@ -191,12 +192,12 @@ for col in ['race', 'sex', 'c_charge_degree', 'score_text', 'age_cat']:
 
 results = []
 all_results = []
-d_train, d_test = train_test_split(compas, test_size=500)
+d_train, d_test = train_test_split(compas, test_size=308)
 data_train = TabularData(d_train[features].values, d_train[decision].values)
 data_test = TabularData(d_test[features].values, d_test[decision].values)
 
 model = combo(input_size=11, vector_size=11)
-hnet = HyperNet(vector_size=11, hidden_dim=100)
+hnet = HyperNet(vector_size=11, hidden_dim=11)
 model = model.double()
 hnet = hnet.double()
 
@@ -207,8 +208,8 @@ device = torch.device(f"cuda:{gpus}" if torch.cuda.is_available() and not no_cud
 hnet=hnet.to(device)
 model=model.to(device)
 
-optimizer = torch.optim.Adam(hnet.parameters(), lr=1e-3, weight_decay=1e-5) #1e-3 is the original
-inner_optimizer = torch.optim.SGD(model.parameters(), lr=1.e-4, momentum=.97, weight_decay=1.e-5)
+optimizer = torch.optim.Adam(hnet.parameters(), lr=5e-2, weight_decay=1e-3) #1e-3 is the original
+inner_optimizer = torch.optim.SGD(model.parameters(), lr=3.e-4, momentum=.9, weight_decay=1.e-2)
 #optimizer = torch.optim.SGD(model.parameters(), lr=1.e-4, momentum=.97, weight_decay=1.e-5)
 loss = nn.BCELoss(reduction='mean')   #binary logarithmic loss function
 

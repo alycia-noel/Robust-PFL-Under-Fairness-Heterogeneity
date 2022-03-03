@@ -29,12 +29,12 @@ class TabularData(Dataset):
         return self.X[idx], self.y[idx]
 
 class NN(nn.Module):
-    def __init__(self, input_size,vector_size, hidden_sizes=[64,64,32]):
+    def __init__(self, input_size,vector_size, hidden_sizes=[64,9,9]):
         super(NN, self).__init__()
         self.input_size = input_size
         self.vector_size = vector_size
-        self.dropout_rate = .35
-        self.hidden_size = 110
+        self.dropout_rate = .8
+        self.hidden_size = 11
 
         # neural network
         self.fc1 = nn.Linear(self.input_size+self.vector_size, hidden_sizes[0]) #[22,64]
@@ -65,11 +65,12 @@ class NN(nn.Module):
         prediction_vector = torch.cat((prediction_vector, x), dim=1)
 
         x1 = F.relu(self.fc1(prediction_vector))
-        x2 = F.relu(self.fc2(x1))
-        x3 = self.dropout(x2)
+        x2 = self.dropout(x1)
+        x3 = F.relu(self.fc2(x2))
+        #x3 = self.dropout(x2)
         x4 = F.relu(self.fc3(x3))
-        x5 = self.dropout(x4)
-        x6 = self.fc4(x5)
+        #x5 = self.dropout(x4)
+        x6 = self.fc4(x4)
         out = torch.sigmoid(x6)
 
         return out
@@ -137,7 +138,7 @@ for col in ['race', 'sex', 'c_charge_degree', 'score_text', 'age_cat']:
 results = []
 
 
-d_train, d_test = train_test_split(compas, test_size=500)
+d_train, d_test = train_test_split(compas, test_size=308)
 data_train = TabularData(d_train[features].values, d_train[decision].values)
 data_test = TabularData(d_test[features].values, d_test[decision].values)
 
@@ -147,7 +148,7 @@ model = model.double()
 train_loader = DataLoader(data_train, shuffle = True, batch_size = 16)
 test_loader = DataLoader(data_test, shuffle = False, batch_size= 16)
 
-optimizer = torch.optim.SGD(model.parameters(), lr=1.e-4, momentum=.97, weight_decay=1.e-5)
+optimizer = torch.optim.SGD(model.parameters(), lr=3.e-4, momentum=.9, weight_decay=1.e-2)
 loss = nn.BCELoss(reduction='mean')   #binary logarithmic loss function
 no_batches = len(train_loader)
 loss_values =[]

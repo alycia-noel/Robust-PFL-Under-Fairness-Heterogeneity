@@ -34,7 +34,7 @@ class combo(nn.Module):
         super(combo, self).__init__()
         self.input_size = input_size
         self.vector_size = vector_size
-        self.hidden_size = 110
+        self.hidden_size = 11
 
         # Logistic Regression
         self.fc1 = nn.Linear(self.input_size + self.vector_size, 1)
@@ -171,7 +171,7 @@ data_train = TabularData(d_train[features].values, d_train[decision].values)
 data_test = TabularData(d_test[features].values, d_test[decision].values)
 
 model = combo(input_size=11, vector_size=11)
-hnet = HyperNet(vector_size=11, hidden_dim=100)
+hnet = HyperNet(vector_size=11, hidden_dim=11) #100
 model = model.double()
 hnet = hnet.double()
 
