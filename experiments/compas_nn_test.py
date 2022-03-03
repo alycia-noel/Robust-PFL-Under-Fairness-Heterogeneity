@@ -29,26 +29,27 @@ class TabularData(Dataset):
         return self.X[idx], self.y[idx]
 
 class NN(nn.Module):
-    def __init__(self, input_size, hidden_sizes=[64,64,32], dropout_rate = .35):
+    def __init__(self, input_size, hidden_sizes=[64,9,9], dropout_rate = .8):
         super(NN, self).__init__()
         self.input_size = input_size
         self.dropout_rate = dropout_rate
 
-        self.fc1 = nn.Linear(self.input_size, hidden_sizes[0])
-        self.fc2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
-        self.fc3 = nn.Linear(hidden_sizes[1], hidden_sizes[2])
+        self.fc1 = nn.Linear(self.input_size, hidden_sizes[1])
+        self.fc2 = nn.Linear(hidden_sizes[1], hidden_sizes[2])
+        self.fc3 = nn.Linear(hidden_sizes[2], hidden_sizes[2])
         self.fc4 = nn.Linear(hidden_sizes[2], 1)
 
         self.dropout = nn.Dropout(self.dropout_rate)
 
     def forward(self, data):
         x1 = F.relu(self.fc1(data))
-        x2 = F.relu(self.fc2(x1))
-        x3 = self.dropout(x2)
-        x4 = F.relu(self.fc3(x3))
-        x5 = self.dropout(x4)
-        x6 = self.fc4(x5)
-        out = torch.sigmoid(x6)
+        x9 = self.dropout(x1)
+        x3 = F.relu(self.fc2(x9))
+        #x4 = self.dropout(x3)
+        x5 = F.relu(self.fc3(x3))
+        #x6 = self.dropout(x5)
+        x7 = self.fc4(x5)
+        out = torch.sigmoid(x7)
 
         return out
 
@@ -114,7 +115,7 @@ for col in ['race', 'sex', 'c_charge_degree', 'score_text', 'age_cat']:
 
 results = []
 
-d_train, d_test = train_test_split(compas, test_size=500)
+d_train, d_test = train_test_split(compas, test_size=308)
 
 data_train = TabularData(d_train[features].values, d_train[decision].values)
 data_test = TabularData(d_test[features].values, d_test[decision].values)
@@ -125,7 +126,7 @@ model = model.double()
 train_loader = DataLoader(data_train, shuffle = True, batch_size = 16)
 test_loader = DataLoader(data_test, shuffle = False, batch_size= 16)
 
-optimizer = torch.optim.SGD(model.parameters(), lr=1.e-4, momentum=.97, weight_decay=1.e-5)
+optimizer = torch.optim.SGD(model.parameters(), lr=.0003, momentum=.90, weight_decay=0.01) #.0003
 #optimizer = torch.optim.Adam(model.parameters(), lr = 2.e-4, weight_decay = 0)
 loss = nn.BCELoss(reduction='none') #Binary Cross Entropy loss
 no_batches = len(train_loader)
@@ -143,7 +144,8 @@ times = []
 # Train model
 model.train()
 torch.cuda.synchronize()
-for epoch in range(100):
+epochs = 100
+for epoch in range(epochs):
     start = time.time()
     running_loss = 0.0
     correct = 0.0
@@ -170,7 +172,7 @@ for epoch in range(100):
     end = time.time()
     elapsed = end - start
     times.append(elapsed)
-    print('Epoch: {0}/{1};\t Loss: {2:1.3f};\tAcc:{3:1.3f};\tTime:{4:1.2f}'.format(epoch + 1, 100, running_loss / len(train_loader), accuracy, elapsed))
+    print('Epoch: {0}/{1};\t Loss: {2:1.3f};\tAcc:{3:1.3f};\tTime:{4:1.2f}'.format(epoch + 1, epochs, running_loss / len(train_loader), accuracy, elapsed))
 
     total_time = sum(times)
 
