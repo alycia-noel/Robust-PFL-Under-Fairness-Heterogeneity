@@ -73,7 +73,7 @@ class HyperNet(nn.Module):
         self.hidden_dim = hidden_dim
         self.vector_size = vector_size
 
-        n_hidden = 1
+        n_hidden = 2
 
         layers = [
             nn.Linear(self.vector_size, hidden_dim),  # [13, 100]
@@ -83,12 +83,12 @@ class HyperNet(nn.Module):
             layers.append(
                 nn.Linear(hidden_dim, hidden_dim)
             )
-        layers.append(nn.Linear(hidden_dim, 22))
+        layers.append(nn.Linear(hidden_dim, hidden_dim))
 
         self.mlp = nn.Sequential(*layers)
 
-        self.fc1_weights = nn.Linear((2*self.vector_size), (2*self.vector_size)) #[input size, 1]
-        self.fc1_bias = nn.Linear(2*self.vector_size, 1)
+        self.fc1_weights = nn.Linear(hidden_dim, (2*self.vector_size)) #[input size, 1]
+        self.fc1_bias = nn.Linear(hidden_dim, 1)
 
 
     # Do a forward pass
@@ -165,8 +165,9 @@ for col in ['race', 'sex', 'c_charge_degree', 'score_text', 'age_cat']:
     compas.loc[:, col] = encoders[col].transform(compas[col])
 
 results = []
+final_results = []
 all_results = []
-d_train, d_test = train_test_split(compas, test_size=500)
+d_train, d_test = train_test_split(compas, test_size=617)
 data_train = TabularData(d_train[features].values, d_train[decision].values)
 data_test = TabularData(d_test[features].values, d_test[decision].values)
 
@@ -181,8 +182,8 @@ device = torch.device(f"cuda:{gpus}" if torch.cuda.is_available() and not no_cud
 
 hnet=hnet.to(device)
 model=model.to(device)
-
-optimizer = torch.optim.Adam(hnet.parameters(), lr=2e-2, weight_decay=1e-3)
+#2e-2
+optimizer = torch.optim.Adam(hnet.parameters(), lr=3e-2, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
 inner_optimizer = torch.optim.SGD(model.parameters(), lr=3.e-4, momentum=.5, weight_decay=3.e-5) #best: 3.e-4, .5, 3.e-5,   3e-3 is the original lr, momentum = .5 and .4 (more like what we want, still kind of jagged), .9 (too high, really wack loss), wd=5e-5
 
 loss = nn.BCELoss(reduction='mean')   #binary logarithmic loss function
@@ -300,6 +301,8 @@ for step in range(steps):
         )
 
         results.append(res)
+        if epoch == epochs - 1:
+            final_results.append(res)
         test_acc.append(accuracy)
         test_error.append(error)
         tn.append(TN)

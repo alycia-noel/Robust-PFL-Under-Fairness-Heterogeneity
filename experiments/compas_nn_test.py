@@ -29,7 +29,7 @@ class TabularData(Dataset):
         return self.X[idx], self.y[idx]
 
 class NN(nn.Module):
-    def __init__(self, input_size, hidden_sizes=[64,9,9], dropout_rate = .8):
+    def __init__(self, input_size, hidden_sizes=[64,11,11], dropout_rate = .45):
         super(NN, self).__init__()
         self.input_size = input_size
         self.dropout_rate = dropout_rate
@@ -37,19 +37,22 @@ class NN(nn.Module):
         self.fc1 = nn.Linear(self.input_size, hidden_sizes[1])
         self.fc2 = nn.Linear(hidden_sizes[1], hidden_sizes[2])
         self.fc3 = nn.Linear(hidden_sizes[2], hidden_sizes[2])
-        self.fc4 = nn.Linear(hidden_sizes[2], 1)
-
+        self.fc4 = nn.Linear(hidden_sizes[2], hidden_sizes[2])
+        self.fc5 = nn.Linear(hidden_sizes[2], 1)
+        self.relu = nn.LeakyReLU()
         self.dropout = nn.Dropout(self.dropout_rate)
 
     def forward(self, data):
         x1 = F.relu(self.fc1(data))
-        x9 = self.dropout(x1)
-        x3 = F.relu(self.fc2(x9))
-        #x4 = self.dropout(x3)
-        x5 = F.relu(self.fc3(x3))
-        #x6 = self.dropout(x5)
-        x7 = self.fc4(x5)
-        out = torch.sigmoid(x7)
+        x2 = self.dropout(x1)
+        x3 = self.relu(self.fc2(x2))
+        x4 = self.dropout(x3)
+        x5 = self.relu(self.fc3(x4))
+        x6 = self.dropout(x5)
+        x7 = self.relu(self.fc4(x6))
+        x8 = self.dropout(x7)
+        x9 = self.fc5(x8)
+        out = torch.sigmoid(x9)
 
         return out
 
@@ -126,8 +129,9 @@ model = model.double()
 train_loader = DataLoader(data_train, shuffle = True, batch_size = 16)
 test_loader = DataLoader(data_test, shuffle = False, batch_size= 16)
 
-optimizer = torch.optim.SGD(model.parameters(), lr=.0003, momentum=.90, weight_decay=0.01) #.0003
-#optimizer = torch.optim.Adam(model.parameters(), lr = 2.e-4, weight_decay = 0)
+#optimizer = torch.optim.SGD(model.parameters(), lr=.001, momentum=.90, weight_decay=.001) #.0003
+#scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size = 10, gamma=.001, last_epoch=-1)
+optimizer = torch.optim.Adam(model.parameters(), lr = .0001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
 loss = nn.BCELoss(reduction='none') #Binary Cross Entropy loss
 no_batches = len(train_loader)
 loss_values = []
@@ -164,7 +168,7 @@ for epoch in range(epochs):
         for i in classes:
             if float(classes[i].item()) == y[i].item():
                 correct = correct + 1
-
+    #scheduler.step()
     accuracy = (100 * correct / len(data_train))
     loss_values.append(running_loss / len(train_loader))
 

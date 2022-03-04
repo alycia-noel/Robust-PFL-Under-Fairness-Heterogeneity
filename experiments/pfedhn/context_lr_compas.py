@@ -125,7 +125,7 @@ for col in ['race', 'sex', 'c_charge_degree', 'score_text', 'age_cat']:
 results = []
 
 
-d_train, d_test = train_test_split(compas, test_size=500)
+d_train, d_test = train_test_split(compas, test_size=617)
 data_train = TabularData(d_train[features].values, d_train[decision].values)
 data_test = TabularData(d_test[features].values, d_test[decision].values)
 

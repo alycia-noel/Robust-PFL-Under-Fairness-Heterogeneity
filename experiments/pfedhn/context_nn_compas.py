@@ -29,19 +29,20 @@ class TabularData(Dataset):
         return self.X[idx], self.y[idx]
 
 class NN(nn.Module):
-    def __init__(self, input_size,vector_size, hidden_sizes=[64,9,9]):
+    def __init__(self, input_size,vector_size, hidden_sizes=[11,11,11]):
         super(NN, self).__init__()
         self.input_size = input_size
         self.vector_size = vector_size
-        self.dropout_rate = .8
+        self.dropout_rate = .45
         self.hidden_size = 11
 
         # neural network
-        self.fc1 = nn.Linear(self.input_size+self.vector_size, hidden_sizes[0]) #[22,64]
-        self.fc2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])#[64,64]
-        self.fc3 = nn.Linear(hidden_sizes[1], hidden_sizes[2])#[64,32]
-        self.fc4 = nn.Linear(hidden_sizes[2], 1)#[32,1]
-
+        self.fc1 = nn.Linear(self.input_size+self.vector_size, hidden_sizes[1])
+        self.fc2 = nn.Linear(hidden_sizes[1], hidden_sizes[2])
+        self.fc3 = nn.Linear(hidden_sizes[2], hidden_sizes[2])
+        self.fc4 = nn.Linear(hidden_sizes[2], hidden_sizes[2])
+        self.fc5 = nn.Linear(hidden_sizes[2], 1)
+        self.relu = nn.LeakyReLU()
         self.dropout = nn.Dropout(self.dropout_rate)
 
         # Context Network
@@ -66,12 +67,14 @@ class NN(nn.Module):
 
         x1 = F.relu(self.fc1(prediction_vector))
         x2 = self.dropout(x1)
-        x3 = F.relu(self.fc2(x2))
-        #x3 = self.dropout(x2)
-        x4 = F.relu(self.fc3(x3))
-        #x5 = self.dropout(x4)
-        x6 = self.fc4(x4)
-        out = torch.sigmoid(x6)
+        x3 = self.relu(self.fc2(x2))
+        x4 = self.dropout(x3)
+        x5 = self.relu(self.fc3(x4))
+        x6 = self.dropout(x5)
+        x7 = self.relu(self.fc4(x6))
+        x8 = self.dropout(x7)
+        x9 = self.fc5(x8)
+        out = torch.sigmoid(x9)
 
         return out
 
@@ -148,7 +151,9 @@ model = model.double()
 train_loader = DataLoader(data_train, shuffle = True, batch_size = 16)
 test_loader = DataLoader(data_test, shuffle = False, batch_size= 16)
 
-optimizer = torch.optim.SGD(model.parameters(), lr=3.e-4, momentum=.9, weight_decay=1.e-2)
+#optimizer = torch.optim.SGD(model.parameters(), lr=3.e-4, momentum=.9, weight_decay=1.e-2)
+optimizer = torch.optim.Adam(model.parameters(), lr = .0001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
+
 loss = nn.BCELoss(reduction='mean')   #binary logarithmic loss function
 no_batches = len(train_loader)
 loss_values =[]
