@@ -141,6 +141,7 @@ test_acc =[]
 test_error = []
 tp = []
 tn = []
+f1 = []
 fp = []
 fn = []
 times = []
@@ -163,13 +164,15 @@ for epoch in range(epochs):
         err.backward()
         optimizer.step()
 
-        classes = torch.argmax(y_, dim=1)
+        preds = y_.round().reshape(1, len(y_))
+        total += data_train.y.size(0)
+        correct += (preds.eq(y)).sum().item()
 
-        for i in classes:
-            if float(classes[i].item()) == y[i].item():
-                correct = correct + 1
+        # predicted_prediction = preds.type(torch.IntTensor).numpy().reshape(-1)
+        # labels_pred = data_train.y.type(torch.IntTensor).numpy().reshape(-1)
+
     #scheduler.step()
-    accuracy = (100 * correct / len(data_train))
+    accuracy = (100*correct / len(data_train))
     loss_values.append(running_loss / len(train_loader))
 
     torch.cuda.synchronize()
@@ -182,18 +185,36 @@ for epoch in range(epochs):
 
     # Eval Model
     model.eval()
-    predictions = []
     running_loss_test = 0
+    TP = 0
+    FP = 0
+    FN = 0
+    TN = 0
+    total = 0.0
+    correct = 0.0
+    predictions = []
     with torch.no_grad():
         for i, (x, y) in enumerate(test_loader):
             pred = model(x)
-            predictions.extend(pred.flatten().numpy())
             test_err = loss(pred.flatten(), y)
             test_err = test_err.mean()
             running_loss_test += test_err.item() * x.size(0)
 
-    test_loss_values.append(running_loss_test / len(test_loader))
+            preds = pred.round().reshape(1, len(pred))
+            predictions.extend(preds.flatten().numpy())
+            correct += (preds.eq(y)).sum().item()
 
+            predicted_prediction = preds.type(torch.IntTensor).numpy().reshape(-1)
+            labels_pred = y.type(torch.IntTensor).numpy().reshape(-1)
+
+            TP += np.count_nonzero((predicted_prediction == 1) & (labels_pred == 1))
+            FP += np.count_nonzero((predicted_prediction == 0) & (labels_pred == 1))
+            TN += np.count_nonzero((predicted_prediction == 0) & (labels_pred == 0))
+            FN += np.count_nonzero((predicted_prediction == 1) & (labels_pred == 0))
+
+    test_loss_values.append(running_loss_test / len(test_loader))
+    f1_score_prediction = TP / (TP + (FP + FN) / 2)
+    f1.append(f1_score_prediction)
 
     if epoch == 99 or (epoch % 49 == 0 and epoch != 0):
         plt.plot(loss_values, label='Train Loss')
@@ -205,14 +226,7 @@ for epoch in range(epochs):
         plt.show()
         # if i % 354 == 0:
 
-    my_rounded_list = [round(elem) for elem in predictions]
-    CM = confusion_matrix(data_test.y, my_rounded_list)
-
-    TN = CM[0][0]
-    FN = CM[1][0]
-    TP = CM[1][1]
-    FP = CM[0][1]
-
+    #accuracy = (100 * correct) / len(data_test)
     accuracy = (TP + TN) / (TP + FP + FN + TN)
     error = (FP + FN) / (TP + FP + FN + TN)
     res = (
@@ -233,11 +247,11 @@ for epoch in range(epochs):
 
 results = pd.concat(results)
 average_test_acc = sum(test_acc) / len(test_acc)
-print(test_acc, test_acc[0], test_acc[len(test_acc) - 1], )
-print('Test Accuracy: ',test_acc[0], test_acc[len(test_acc) - 1], average_test_acc)
-print('Test Error: ', test_error[0], test_error[len(test_error) - 1])
+print('Test Accuracy: {0:1.3f};'.format(test_acc[len(test_acc) - 1]))
+print('Test Error: {0:1.3f};'.format(test_error[len(test_error) - 1]))
+print('TP: ', tp[len(tp)-1], 'FP: ', fp[len(fp)-1], 'TN: ', tn[len(tn)-1], 'FN: ', fn[len(fn)-1])
+print('F1: ', f1[len(f1)- 1])
 print('Train Time: ', total_time)
-print('TP: ', tp[len(tp)-1], 'TN: ', tn[len(tn)-1], 'FP: ', fp[len(fp)-1], 'FN: ', fn[len(fn)-1])
 for col, encoder in encoders.items():
         results.loc[:,col] = encoder.inverse_transform(results[col])
 

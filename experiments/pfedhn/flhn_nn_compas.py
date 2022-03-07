@@ -99,7 +99,7 @@ class HyperNet(nn.Module):
             layers.append(nn.LeakyReLU(inplace=True))
             layers.append(nn.Linear(hidden_dim, hidden_dim))
 
-        layers.append(nn.Linear(hidden_dim, hidden_dim))
+        #layers.append(nn.Linear(hidden_dim, hidden_dim))
 
         self.mlp = nn.Sequential(*layers)
 
@@ -198,6 +198,8 @@ for col in ['race', 'sex', 'c_charge_degree', 'score_text', 'age_cat']:
 
 results = []
 all_results = []
+final_results = []
+final_plot = []
 d_train, d_test = train_test_split(compas, test_size=308)
 data_train = TabularData(d_train[features].values, d_train[decision].values)
 data_test = TabularData(d_test[features].values, d_test[decision].values)
@@ -214,7 +216,7 @@ device = torch.device(f"cuda:{gpus}" if torch.cuda.is_available() and not no_cud
 hnet=hnet.to(device)
 model=model.to(device)
 #2e-2
-optimizer = torch.optim.Adam(hnet.parameters(), lr=1e-2, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01, amsgrad=False) #1e-3 is the original 2e-2
+optimizer = torch.optim.Adam(hnet.parameters(), lr=3e-2, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01, amsgrad=False) #3e-2, .01
 inner_optimizer = torch.optim.Adam(model.parameters(), lr = .0001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
 
 loss = nn.BCELoss(reduction='mean')   #binary logarithmic loss function
@@ -235,7 +237,7 @@ fn = []
 times = []
 
 # Train model
-steps = 4 #10
+steps = 4 #5
 epochs = 50 #20
 place = 0
 torch.cuda.synchronize()
@@ -333,6 +335,8 @@ for step in range(steps):
         )
 
         results.append(res)
+        if step == steps - 1:
+            final_results.append(res)
         test_acc.append(accuracy)
         test_error.append(error)
         tn.append(TN)
@@ -341,6 +345,13 @@ for step in range(steps):
         fp.append(FP)
 
     all_results = pd.concat(results)
+
+    if step == steps - 1:
+        final_plot = pd.concat(final_results)
+
+        for col, encoder in encoders.items():
+            final_plot.loc[:, col] = encoder.inverse_transform(final_plot[col])
+
     average_test_acc = sum(test_acc) / len(test_acc)
     print('Test Accuracy: ',test_acc[0], test_acc[len(test_acc) - 1], average_test_acc)
     print('Test Error: ', test_error[0], test_error[len(test_error) - 1])
@@ -372,4 +383,4 @@ for step in range(steps):
     optimizer.step()
 
 print(sum(times))
-plot_roc_curves(all_results, 'prediction', 'two_year_recid', size=(7, 5), fname='./results/roc.png')
+plot_roc_curves(final_plot, 'prediction', 'two_year_recid', size=(7, 5), fname='./results/roc.png')
