@@ -10,9 +10,9 @@ import torch
 import torch.utils.data
 from tqdm import trange # for the progress bar
 
-from experiments.pfedhn.models import HyperCIFAR, TargetAndContextCIFAR # loads the model architecture
-from experiments.pfedhn.node import BaseNodes # loads the client generator
-from experiments.utils import get_device, set_logger, set_seed, str2bool # loads extra tools
+from experiments import HyperCIFAR, TargetAndContextCIFAR # loads the model architecture
+from experiments import BaseNodes # loads the client generator
+from experiments.extra.utils import get_device, set_logger, set_seed, str2bool # loads extra tools
 
 import warnings
 

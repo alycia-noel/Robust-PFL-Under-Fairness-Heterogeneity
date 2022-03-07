@@ -1,4 +1,4 @@
-from experiments.dataset import gen_random_loaders
+from experiments.extra.dataset import gen_random_loaders
 
 # creates each client
 class BaseNodes:
