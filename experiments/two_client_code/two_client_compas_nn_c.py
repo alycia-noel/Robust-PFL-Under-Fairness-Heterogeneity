@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader
-from collections import OrderedDict
 import torch.nn.functional as F
 from sklearn.metrics import roc_curve, auc, confusion_matrix
 
@@ -29,15 +28,22 @@ class TabularData(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
 
-class combo(nn.Module):
-    def __init__(self, input_size, vector_size):
-        super(combo, self).__init__()
+class NN(nn.Module):
+    def __init__(self, input_size,vector_size, hidden_sizes=[10,10,10]):
+        super(NN, self).__init__()
         self.input_size = input_size
         self.vector_size = vector_size
+        self.dropout_rate = .45
         self.hidden_size = 10
 
-        # Logistic Regression
-        self.fc1 = nn.Linear(self.input_size + self.vector_size, 1)
+        # neural network
+        self.fc1 = nn.Linear(self.input_size+self.vector_size, hidden_sizes[1])
+        self.fc2 = nn.Linear(hidden_sizes[1], hidden_sizes[2])
+        self.fc3 = nn.Linear(hidden_sizes[2], hidden_sizes[2])
+        self.fc4 = nn.Linear(hidden_sizes[2], hidden_sizes[2])
+        self.fc5 = nn.Linear(hidden_sizes[2], 1)
+        self.relu = nn.LeakyReLU()
+        self.dropout = nn.Dropout(self.dropout_rate)
 
         # Context Network
         self.context_fc1 = nn.Linear(self.input_size, self.hidden_size)
@@ -46,7 +52,7 @@ class combo(nn.Module):
         self.context_relu2 = nn.LeakyReLU()
         self.context_fc3 = nn.Linear(self.hidden_size, self.vector_size)
 
-    def forward(self, x, context_only):
+    def forward(self, x):
         # Pass through context network
         hidden1 = self.context_fc1(x)
         relu1 = self.context_relu1(hidden1)
@@ -59,53 +65,21 @@ class combo(nn.Module):
         prediction_vector = avg_context_vector.expand(len(x), self.vector_size)
         prediction_vector = torch.cat((prediction_vector, x), dim=1)
 
-        if context_only:
-            return context_vector, avg_context_vector, prediction_vector
+        x1 = F.relu(self.fc1(prediction_vector))
+        x2 = self.dropout(x1)
+        x3 = self.relu(self.fc2(x2))
+        x4 = self.dropout(x3)
+        x5 = self.relu(self.fc3(x4))
+        x6 = self.dropout(x5)
+        x7 = self.relu(self.fc4(x6))
+        x8 = self.dropout(x7)
+        x9 = self.fc5(x8)
+        out = torch.sigmoid(x9)
 
-        x1 = self.fc1(prediction_vector)
-        y = torch.sigmoid(x1)
-        return y
-
-class HyperNet(nn.Module):
-    def __init__(self, vector_size, hidden_dim):
-        super().__init__()
-
-        self.hidden_dim = hidden_dim
-        self.vector_size = vector_size
-
-        n_hidden = 2
-
-        layers = [
-            nn.Linear(self.vector_size, hidden_dim),  # [13, 100]
-        ]
-        for _ in range(n_hidden):
-            layers.append(nn.LeakyReLU(inplace=True))
-            layers.append(
-                nn.Linear(hidden_dim, hidden_dim)
-            )
-        layers.append(nn.Linear(hidden_dim, hidden_dim))
-
-        self.mlp = nn.Sequential(*layers)
-
-        self.fc1_weights = nn.Linear(hidden_dim, (2*self.vector_size)) #[input size, 1]
-        self.fc1_bias = nn.Linear(hidden_dim, 1)
+        return out
 
 
-    # Do a forward pass
-    def forward(self, context_vec):
-        context_vec = context_vec.view(1,self.vector_size) #[1,13]
-
-        # Generate the weight output features by passing the context_vector through the hypernetwork mlp
-        features = self.mlp(context_vec)
-
-        weights = OrderedDict({
-            "fc1.weight": self.fc1_weights(features).view(1,2*self.vector_size),
-            "fc1.bias": self.fc1_bias(features).view(-1),
-        })
-
-        return weights
-
-def plot_roc_curves(results, pred_col, resp_col, size=(7, 5), fname=None):
+def plot_roc_curves(results, pred_col, resp_col, c, size=(7, 5), fname=None):
     plt.clf()
     plt.style.use('classic')
     plt.figure(figsize=size)
@@ -125,7 +99,8 @@ def plot_roc_curves(results, pred_col, resp_col, size=(7, 5), fname=None):
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
     plt.legend(loc="lower right")
-    plt.title('ROC for FL HN Adaptive LR on COMPAS')
+    title_roc = 'ROC for Adaptive NN on COMPAS - Client ' + str(c + 1)
+    plt.title(title_roc)
     #if fname is not None:
     #    plt.savefig(fname)
     #else:
@@ -156,107 +131,100 @@ compas = df_filtered[cols]
 compas['length_of_stay'] /= np.timedelta64(1, 'D')
 compas['length_of_stay'] = np.ceil(compas['length_of_stay'])
 
-cols = compas.columns
-features, decision = cols[:-1], cols[-1]
-
 encoders = {}
 for col in ['race', 'sex', 'c_charge_degree', 'score_text', 'age_cat']:
     encoders[col] = LabelEncoder().fit(compas[col])
     compas.loc[:, col] = encoders[col].transform(compas[col])
 
-results = []
-final_results = []
-all_results = []
-d_train, d_test = train_test_split(compas, test_size=617)
-data_train = TabularData(d_train[features].values, d_train[decision].values)
-data_test = TabularData(d_test[features].values, d_test[decision].values)
+client_1 = compas[compas['age'] <= 31] #3164
 
-model = combo(input_size=10, vector_size=10)
-hnet = HyperNet(vector_size=10, hidden_dim=10) #100
+client_2 = compas[compas['age'] > 31] #3008
+
+cols_1 = client_1.columns
+features_1, decision_1 = cols_1[:-1], cols_1[-1]
+
+cols_2 = client_2.columns
+features_2, decision_2 = cols_2[:-1], cols_2[-1]
+
+clients = 2
+
+d_train_1, d_test_1 = train_test_split(client_1, test_size=300)
+data_train_1 = TabularData(d_train_1[features_1].values, d_train_1[decision_1].values)
+data_test_1 = TabularData(d_test_1[features_1].values, d_test_1[decision_1].values)
+
+d_train_2, d_test_2 = train_test_split(client_2, test_size=300)
+data_train_2 = TabularData(d_train_2[features_2].values, d_train_2[decision_2].values)
+data_test_2 = TabularData(d_test_2[features_2].values, d_test_2[decision_2].values)
+
+
+model = NN(input_size=10, vector_size=10)
 model = model.double()
-hnet = hnet.double()
+optimizer = torch.optim.Adam(model.parameters(), lr = .0001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
+loss = nn.BCELoss(reduction='mean')
 
-no_cuda=False
-gpus='0'
-device = torch.device(f"cuda:{gpus}" if torch.cuda.is_available() and not no_cuda else "cpu")
+print("Start")
+for c in range(clients):
+    if c == 0:
+        data_train = data_train_1
+        data_test = data_test_1
+    else:
+        data_train = data_train_2
+        data_test = data_test_2
 
-hnet=hnet.to(device)
-model=model.to(device)
-#2e-2
-optimizer = torch.optim.Adam(hnet.parameters(), lr=3e-2, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
-inner_optimizer = torch.optim.Adam(model.parameters(), lr = 5.e-4, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
+    train_loader = DataLoader(data_train, shuffle = True, batch_size = 16)
+    test_loader = DataLoader(data_test, shuffle = False, batch_size= 16)
+    train_loader = DataLoader(data_train, shuffle = True, batch_size = 16)
+    test_loader = DataLoader(data_test, shuffle = False, batch_size= 16)
 
-#torch.optim.SGD(model.parameters(), lr=3.e-4, momentum=.5, weight_decay=3.e-5) #best: 3.e-4, .5, 3.e-5,   3e-3 is the original lr, momentum = .5 and .4 (more like what we want, still kind of jagged), .9 (too high, really wack loss), wd=5e-5
 
-loss = nn.BCELoss(reduction='mean')   #binary logarithmic loss function
+    no_batches = len(train_loader)
+    loss_values =[]
+    test_loss_values = []
+    acc_values = []
+    test_acc =[]
+    results = []
+    test_error = []
+    tp = []
+    tn = []
+    fp = []
+    fn = []
+    times = []
+    f1 = []
 
-train_loader = DataLoader(data_train, shuffle = True, batch_size = 32)
-test_loader = DataLoader(data_test, shuffle = False, batch_size= 32)
+    # Train model
 
-no_batches = len(train_loader)
-loss_values =[]
-test_loss_values = []
-acc_values = []
-test_acc =[]
-test_error = []
-tp = []
-tn = []
-fp = []
-fn = []
-times = []
-f1 = []
-# Train model
-steps = 10
-epochs = 10
-place = 0
-torch.cuda.synchronize()
-for step in range(steps):
-
-    print('#######################')
-    print('On Outer Iteration: ', step+1)
-    print('#######################')
-    hnet.train()
+    model.train() #warm-up
     torch.cuda.synchronize()
-    start_epoch = time.time()
-
-    for epoch in range(epochs):
-        place = place + 1
-        model.train()
+    for epoch in range(100): #original 250, best:700
+        start_epoch = time.time()
         running_loss = 0.0
         correct = 0
         total = 0.0
-
         for i, (x, y) in enumerate(train_loader):
-            # Generate weights on first round of the inner loop
-            if epoch == 0 and i == 0:
-                context_vectors, avg_context_vector, prediction_vector = model(x.to(device), context_only=True)
-
-                weights = hnet(avg_context_vector)
-                net_dict = model.state_dict()
-                hnet_dict = {k: v for k, v in weights.items() if k in net_dict}
-                net_dict.update(hnet_dict)
-                model.load_state_dict(net_dict)
-
-                inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
-
-            inner_optimizer.zero_grad()
             optimizer.zero_grad()
-
-            y_ = model(x.to(device), context_only=False)
-            err = loss(y_, y.unsqueeze(1).to(device))
+            y_ = model(x)
+            err = loss(y_.flatten(), y)
             err = err.mean()
             running_loss += err.item() * x.size(0)
             err.backward()
-            inner_optimizer.step()
+            optimizer.step()
 
-            preds = y_.detach().cpu().round().reshape(1, len(y_))
+            classes = torch.argmax(y_, dim=1)
+
+            preds = y_.round().reshape(1, len(y_))
             correct += (preds.eq(y)).sum().item()
 
         accuracy = (100 * correct / len(data_train))
         acc_values.append(accuracy)
         loss_values.append(running_loss / len(train_loader))
 
-        print('Step: {5}/{6};\tEpoch: {0}/{1};\tLoss: {2:1.3f};\tAcc: {3:1.3f};\tPercent: {4:1.2f}%'.format(epoch+1, epochs, running_loss / len(train_loader), accuracy,(100*place)/(epochs*steps), step+1, steps))
+        torch.cuda.synchronize()
+        end_epoch = time.time()
+        elapsed = end_epoch - start_epoch
+        times.append(elapsed)
+        #print('Epoch: {0}/{1};\t Loss: {2:1.3f};\tAcc:{3:1.3f};\tTime:{4:1.2f}'.format(epoch + 1, 100, running_loss / len(train_loader), accuracy, elapsed))
+
+        total_time = sum(times)
 
         # Eval Model
         model.eval()
@@ -270,11 +238,12 @@ for step in range(steps):
         correct = 0.0
         with torch.no_grad():
             for i, (x, y) in enumerate(test_loader):
-                pred = model(x.to(device), context_only=False)
-                test_err = loss(pred.flatten(), y.to(device))
+                pred = model(x)
+                test_err = loss(pred.flatten(), y)
                 test_err = test_err.mean()
                 running_loss_test += test_err.item() * x.size(0)
-                preds = pred.detach().cpu().round().reshape(1, len(pred))
+
+                preds = pred.round().reshape(1, len(pred))
                 predictions.extend(preds.flatten().numpy())
                 correct += (preds.eq(y)).sum().item()
 
@@ -291,66 +260,52 @@ for step in range(steps):
         f1_score_prediction = TP / (TP + (FP + FN) / 2)
         f1.append(f1_score_prediction)
 
-        if epoch == epochs - 1 and step == steps - 1:
+        if epoch == 99:
             plt.plot(loss_values, label='Train Loss')
             plt.plot(test_loss_values, label='Test Loss')
             plt.xlabel('Epoch')
             plt.ylabel('Loss')
-            plt.title('Loss over Epochs for FL HN Adaptive LR Model on COMPAS')
+            title_loss = 'Loss over Epochs for Adaptive NN Model on COMPAS - Client ' + str(c + 1)
+            plt.title(title_loss)
             plt.legend(loc="upper right")
             plt.show()
 
         accuracy = (TP+TN)/(TP+FP+FN+TN)
         error    = (FP+FN)/(TP+FP+FN+TN)
-        res = (
-        pd  .DataFrame(columns = features, index = d_test.index)
-            .add_suffix('_partial')
-            .join(d_test)
-            .assign(prediction=predictions)
-            .assign(round=(step+1)*epoch)
-        )
+        if c == 0:
+            res = (
+                pd.DataFrame(columns=features_1, index=d_test_1.index)
+                    .add_suffix('_partial')
+                    .join(d_test_1)
+                    .assign(prediction=predictions)
+                    .assign(round=epoch)
+            )
+        else:
+            res = (
+                pd.DataFrame(columns=features_2, index=d_test_2.index)
+                    .add_suffix('_partial')
+                    .join(d_test_2)
+                    .assign(prediction=predictions)
+                    .assign(round=epoch)
+            )
 
         results.append(res)
-        if epoch == epochs - 1:
-            final_results.append(res)
         test_acc.append(accuracy)
         test_error.append(error)
         tn.append(TN)
         tp.append(TP)
         fn.append(FN)
         fp.append(FP)
-
-    all_results = pd.concat(results)
+    results = pd.concat(results)
     average_test_acc = sum(test_acc) / len(test_acc)
+    print('Client: ', c + 1)
     print('Test Accuracy: {0:1.3f};'.format(test_acc[len(test_acc) - 1]))
     print('Test Error: {0:1.3f};'.format(test_error[len(test_error) - 1]))
-    print('TP: ', tp[len(tp) - 1], 'FP: ', fp[len(fp) - 1], 'TN: ', tn[len(tn) - 1], 'FN: ', fn[len(fn) - 1])
-    print('F1: {0:1.3f}'.format(f1[len(f1) - 1]))
+    print('TP: ', tp[len(tp)-1], 'FP: ', fp[len(fp)-1], 'TN: ', tn[len(tn)-1], 'FN: ', fn[len(fn)-1])
+    print('F1: {0:1.3f}'.format(f1[len(f1)- 1]))
+    print('Train Time: {0:1.2f}'.format(total_time))
+
     for col, encoder in encoders.items():
-            all_results.loc[:,col] = encoder.inverse_transform(all_results[col])
+            results.loc[:,col] = encoder.inverse_transform(results[col])
 
-    torch.cuda.synchronize()
-    end_epoch = time.time()
-    elapsed = end_epoch - start_epoch
-    times.append(elapsed)
-
-    optimizer.zero_grad()
-    final_state = model.state_dict()
-
-    # calculating delta theta
-    delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
-
-    # calculating phi gradient
-    hnet_grads = torch.autograd.grad(
-        list(weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values())
-    )
-
-    # update hnet weights
-    for p, g in zip(hnet.parameters(), hnet_grads):
-        p.grad = g
-
-    # torch.nn.utils.clip_grad_norm_(hnet.parameters(), 50)
-    optimizer.step()
-
-print(sum(times))
-plot_roc_curves(all_results, 'prediction', 'two_year_recid', size=(7, 5), fname='./results/roc.png')
+    plot_roc_curves(results, 'prediction', 'two_year_recid', c, size=(7, 5), fname='./results/roc.png')
