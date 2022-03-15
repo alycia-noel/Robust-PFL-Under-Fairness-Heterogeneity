@@ -1,5 +1,6 @@
 import time
 import warnings
+import os
 import torch
 import torch.nn as nn
 import numpy as np
@@ -90,7 +91,7 @@ class HyperNet(nn.Module):
         self.hidden_dim = hidden_dim
         self.vector_size = vector_size
 
-        n_hidden = 3#4
+        n_hidden = 3#2#3
 
         layers = [
             nn.Linear(self.vector_size, hidden_dim),  # [13, 100]
@@ -219,16 +220,17 @@ c2_model = c2_model.double()
 hnet = hnet.double()
 
 no_cuda=False
-gpus='0'
-device = torch.device(f"cuda:{gpus}" if torch.cuda.is_available() and not no_cuda else "cpu")
+gpus='4'
+device = torch.cuda.set_device(4)
+#device = torch.device(f"cuda:{gpus}" if torch.cuda.is_available() and not no_cuda else "cpu")
 
 hnet=hnet.to(device)
 c1_model=c1_model.to(device)
 c2_model=c2_model.to(device)
 
-optimizer = torch.optim.Adam(hnet.parameters(), lr=2e-2, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False) #3e-2, .01
-c1_inner_optimizer = torch.optim.Adam(c1_model.parameters(), lr = .0001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
-c2_inner_optimizer = torch.optim.Adam(c2_model.parameters(), lr = .0001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
+optimizer = torch.optim.Adam(hnet.parameters(), lr=1e-2, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False) #3e-2, .01
+c1_inner_optimizer = torch.optim.Adam(c1_model.parameters(), lr = .00015, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
+c2_inner_optimizer = torch.optim.Adam(c2_model.parameters(), lr = .0005, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
 
 loss = nn.BCELoss(reduction='mean')   #binary logarithmic loss function
 
@@ -262,8 +264,8 @@ c2_results = []
 c2_final_results = []
 c2_all_results = []
 # Train model
-steps = 10 #5
-epochs = 25 #20
+steps = 10#9#10
+epochs = 25#30
 
 print("Start")
 torch.cuda.synchronize()
