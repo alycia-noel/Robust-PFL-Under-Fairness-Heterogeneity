@@ -149,7 +149,7 @@ times = []
 # Train model
 model.train() #warm-up
 torch.cuda.synchronize()
-for epoch in range(500):
+for epoch in range(50):
     start = time.time()
     running_loss = 0.0
     correct = 0.0
