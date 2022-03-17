@@ -120,6 +120,7 @@ data_test_2 = TabularData(d_test_2[features_2].values, d_test_2[decision_2].valu
 
 model = LR(input_size=10)
 model = model.double()
+torch.cuda.set_device(4)
 
 optimizer = torch.optim.Adam(model.parameters(), lr = 2.e-4, weight_decay = 0.)
 loss = nn.BCELoss(reduction='none')

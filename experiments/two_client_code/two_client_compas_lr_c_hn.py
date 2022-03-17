@@ -189,7 +189,7 @@ c2_model = c2_model.double()
 hnet = hnet.double()
 
 no_cuda=False
-gpus='0'
+gpus='4'
 device = torch.device(f"cuda:{gpus}" if torch.cuda.is_available() and not no_cuda else "cpu")
 
 hnet=hnet.to(device)
@@ -202,37 +202,28 @@ c2_inner_optimizer = torch.optim.Adam(c2_model.parameters(), lr = 5.e-4, betas=(
 
 loss = nn.BCELoss(reduction='mean')   #binary logarithmic loss function
 
-c1_loss_values =[]
-c1_test_loss_values = []
-c1_acc_values = []
-c1_test_acc =[]
-c1_test_error = []
-c1_tp = []
-c1_tn = []
-c1_fp = []
-c1_fn = []
+c1_loss_values, c1_test_loss_values =[], []
+c1_acc_values, c1_test_acc, c1_f_acc, c1_m_acc = [], [], [], []
+c1_test_error, c1_f_err, c1_m_err = [], [], []
+c1_tp, c1_tn, c1_fp, c1_fn = [], [], [], []
+c1_f_tp, c1_f_tn, c1_f_fp, c1_f_fn = [], [], [], []
+c1_m_tp, c1_m_tn, c1_m_fp, c1_m_fn = [], [], [], []
 c1_times = []
-c1_f1 = []
-c1_results = []
-c1_final_results = []
-c1_final_final_results = []
-c1_all_results = []
+c1_f1, c1_f_f1, c1_m_f1 = [], [], []
+c1_EOD, c1_SPD, c1_AOD = [], [], []
+c1_results, c1_final_results, c1_final_final_results, c1_all_results = [], [], [], []
 
-c2_loss_values =[]
-c2_test_loss_values = []
-c2_acc_values = []
-c2_test_acc =[]
-c2_test_error = []
-c2_tp = []
-c2_tn = []
-c2_fp = []
-c2_fn = []
+c2_loss_values, c2_test_loss_values =[], []
+c2_acc_values, c2_test_acc, c2_f_acc, c2_m_acc = [], [], [], []
+c2_test_error, c2_f_err, c2_m_err = [], [], []
+c2_tp, c2_tn, c2_fp, c2_fn = [], [], [], []
+c2_f_tp, c2_f_tn, c2_f_fp, c2_f_fn = [], [], [], []
+c2_m_tp, c2_m_tn, c2_m_fp, c2_m_fn = [], [], [], []
 c2_times = []
-c2_f1 = []
-c2_results = []
-c2_final_results = []
-c2_final_final_results = []
-c2_all_results = []
+c2_f1, c2_f_f1, c2_m_f1 = [], [], []
+c2_EOD, c2_SPD, c2_AOD = [], [], []
+c2_results, c2_final_results, c2_final_final_results, c2_all_results = [], [], [], []
+
 
 # Train model
 steps = 10
@@ -324,10 +315,9 @@ for step in range(steps):
             model.eval()
             predictions = []
             running_loss_test = 0
-            TP = 0
-            FP = 0
-            FN = 0
-            TN = 0
+            TP, FP, FN, TN = 0, 0, 0, 0
+            f_tp, f_fp, f_tn, f_fn = 0, 0, 0, 0
+            m_tp, m_fp, m_tn, m_fn = 0, 0, 0, 0
             total = 0.0
             correct = 0.0
             with torch.no_grad():
@@ -343,10 +333,33 @@ for step in range(steps):
                     predicted_prediction = preds.type(torch.IntTensor).numpy().reshape(-1)
                     labels_pred = y.type(torch.IntTensor).numpy().reshape(-1)
 
-                    TP += np.count_nonzero((predicted_prediction == 1) & (labels_pred == 1))
-                    FP += np.count_nonzero((predicted_prediction == 0) & (labels_pred == 1))
-                    TN += np.count_nonzero((predicted_prediction == 0) & (labels_pred == 0))
-                    FN += np.count_nonzero((predicted_prediction == 1) & (labels_pred == 0))
+                    for i in range(len(x)):
+                        if x[i, 5].item() == 0:
+                            if predicted_prediction[i] == 1 and labels_pred[i] == 1:
+                                f_tp += 1
+                                TP += 1
+                            elif predicted_prediction[i] == 1 and labels_pred[i] == 0:
+                                f_fp += 1
+                                FP += 1
+                            elif predicted_prediction[i] == 0 and labels_pred[i] == 0:
+                                f_tn += 1
+                                TN += 1
+                            elif predicted_prediction[i] == 0 and labels_pred[i] == 1:
+                                f_fn += 1
+                                FN += 1
+                        else:
+                            if predicted_prediction[i] == 1 and labels_pred[i] == 1:
+                                m_tp += 1
+                                TP += 1
+                            elif predicted_prediction[i] == 1 and labels_pred[i] == 0:
+                                m_fp += 1
+                                FP += 1
+                            elif predicted_prediction[i] == 0 and labels_pred[i] == 0:
+                                m_tn += 1
+                                TN += 1
+                            elif predicted_prediction[i] == 0 and labels_pred[i] == 1:
+                                m_fn += 1
+                                FN += 1
 
             if c == 0:
                 c1_test_loss_values.append(running_loss_test / len(test_loader))
@@ -354,13 +367,19 @@ for step in range(steps):
                 c2_test_loss_values.append(running_loss_test / len(test_loader))
 
             f1_score_prediction = TP / (TP + (FP + FN) / 2)
+            f1_female = f_tp / (f_tp + (f_fp + f_fn) / 2)
+            f1_male = m_tp / (m_tp + (m_fp + m_fn) / 2)
 
             if c == 0:
                 c1_f1.append(f1_score_prediction)
+                c1_f_f1.append(f1_female)
+                c1_m_f1.append(f1_male)
                 loss_values = c1_loss_values
                 test_loss_values = c1_test_loss_values
             else:
                 c2_f1.append(f1_score_prediction)
+                c2_f_f1.append(f1_female)
+                c2_m_f1.append(f1_male)
                 loss_values = c2_loss_values
                 test_loss_values = c2_test_loss_values
 
@@ -374,8 +393,18 @@ for step in range(steps):
                 plt.legend(loc="upper right")
                 plt.show()
 
-            accuracy = (TP+TN)/(TP+FP+FN+TN)
-            error    = (FP+FN)/(TP+FP+FN+TN)
+            accuracy = (TP + TN) / (TP + FP + FN + TN)
+            f_acc = (f_tp + f_tn) / (f_tp + f_fp + f_fn + f_tn)
+            m_acc = (m_tp + m_tn) / (m_tp + m_fp + m_fn + m_tn)
+
+            error = (FP + FN) / (TP + FP + FN + TN)
+            f_err = (f_fp + f_fn) / (f_tp + f_fp + f_fn + f_tn)
+            m_err = (m_fp + m_fn) / (m_tp + m_fp + m_fn + m_tn)
+
+            AOD = (((f_tp / (f_tp + f_fn)) - (m_tp / (m_tp + m_fn))) + ((f_fp / (f_fp + f_tn)) - (m_fp / (m_fp + m_tn)))) / 2  # average odds difference
+            EOD = (f_tp / (f_tp + f_fn)) - (m_tp / (m_tp + m_fn))  # equal opportunity difference
+            SPD = (f_tp + f_fp) / (f_tp + f_fp + f_tn + f_fn) - (m_tp + m_fp) / (m_tp + m_fp + m_tn + m_fn)
+
             if c == 0:
                 res = (
                     pd.DataFrame(columns=features_1, index=d_test_1.index)
@@ -397,33 +426,101 @@ for step in range(steps):
                 c1_results.append(res)
                 if epoch == epochs - 1:
                     c1_final_results.append(res)
+
                 c1_test_acc.append(accuracy)
+                c1_f_acc.append(f_acc)
+                c1_m_acc.append(m_acc)
                 c1_test_error.append(error)
+                c1_f_err.append(f_err)
+                c1_m_err.append(m_err)
+
                 c1_tn.append(TN)
                 c1_tp.append(TP)
                 c1_fn.append(FN)
                 c1_fp.append(FP)
+
+                c1_f_tn.append(f_tn)
+                c1_f_tp.append(f_tp)
+                c1_f_fn.append(f_fn)
+                c1_f_fp.append(f_fp)
+
+                c1_m_tn.append(m_tn)
+                c1_m_tp.append(m_tp)
+                c1_m_fn.append(m_fn)
+                c1_m_fp.append(m_fp)
+
+                c1_EOD.append(EOD)
+                c1_SPD.append(SPD)
+                c1_AOD.append(AOD)
+
             else:
                 c2_results.append(res)
                 if epoch == epochs - 1:
                     c2_final_results.append(res)
+
                 c2_test_acc.append(accuracy)
+                c2_f_acc.append(f_acc)
+                c2_m_acc.append(m_acc)
                 c2_test_error.append(error)
+                c2_f_err.append(f_err)
+                c2_m_err.append(m_err)
+
                 c2_tn.append(TN)
                 c2_tp.append(TP)
                 c2_fn.append(FN)
                 c2_fp.append(FP)
 
+                c2_f_tn.append(f_tn)
+                c2_f_tp.append(f_tp)
+                c2_f_fn.append(f_fn)
+                c2_f_fp.append(f_fp)
+
+                c2_m_tn.append(m_tn)
+                c2_m_tp.append(m_tp)
+                c2_m_fn.append(m_fn)
+                c2_m_fp.append(m_fp)
+
+                c2_EOD.append(EOD)
+                c2_SPD.append(SPD)
+                c2_AOD.append(AOD)
+
         if c == 0:
             c1_all_results = pd.concat(c1_results)
             c1_final_final_results = pd.concat(c1_final_results)
             average_test_acc = sum(c1_test_acc) / len(c1_test_acc)
+            female_test_acc = sum(c1_f_acc) / len(c1_f_acc)
+            male_test_acc = sum(c1_m_acc) / len(c1_m_acc)
             print('Client: ', c + 1)
+            print('*******************')
+            print('*       all       *')
+            print('*******************')
             print('Test Accuracy: {0:1.3f};'.format(c1_test_acc[len(c1_test_acc) - 1]))
             print('Test Error: {0:1.3f};'.format(c1_test_error[len(c1_test_error) - 1]))
             print('TP: ', c1_tp[len(c1_tp) - 1], 'FP: ', c1_fp[len(c1_fp) - 1], 'TN: ', c1_tn[len(c1_tn) - 1], 'FN: ', c1_fn[len(c1_fn) - 1])
+            print('EOD: {0:1.4f}'.format(c1_EOD[len(c1_EOD) - 1]))
+            print('SPD: {0:1.4f}'.format(c1_SPD[len(c1_SPD) - 1]))
+            print('AOD: {0:1.4f}'.format(c1_AOD[len(c1_AOD) - 1]))
             print('F1: {0:1.3f}'.format(c1_f1[len(c1_f1) - 1]))
             print("")
+            print('**********************')
+            print('*       Female       *')
+            print('**********************')
+            print('Test Accuracy: {0:1.3f}'.format(c1_f_acc[len(c1_f_acc) - 1]))
+            print('Test Error: {0:1.3f}'.format(c1_f_err[len(c1_f_err) - 1]))
+            print('TP: ', c1_f_tp[len(c1_f_tp) - 1], 'FP: ', c1_f_fp[len(c1_f_fp) - 1], 'TN: ', c1_f_tn[len(c1_f_tn) - 1], 'FN: ',
+                  c1_f_fn[len(c1_f_fn) - 1])
+            print('F1: {0:1.3f}'.format(c1_f_f1[len(c1_f_f1) - 1]))
+            print("")
+            print('********************')
+            print('*       Male       *')
+            print('********************')
+            print('Test Accuracy: {0:1.3f}'.format(c1_m_acc[len(c1_m_acc) - 1]))
+            print('Test Error: {0:1.3f}'.format(c1_m_err[len(c1_m_err) - 1]))
+            print('TP: ', c1_m_tp[len(c1_m_tp) - 1], 'FP: ', c1_m_fp[len(c1_m_fp) - 1], 'TN: ',
+                  c1_m_tn[len(c1_m_tn) - 1], 'FN: ',
+                  c1_m_fn[len(c1_m_fn) - 1])
+            print('F1: {0:1.3f}'.format(c1_m_f1[len(c1_m_f1) - 1]))
+
             for col, encoder in encoders.items():
                     c1_all_results.loc[:,col] = encoder.inverse_transform(c1_all_results[col])
 
@@ -434,13 +531,42 @@ for step in range(steps):
         else:
             c2_all_results = pd.concat(c2_results)
             c2_final_final_results = pd.concat(c2_final_results)
-            average_test_acc = sum(c2_test_acc) / len(c2_test_acc)
+            average_test_acc = sum(c1_test_acc) / len(c1_test_acc)
+            female_test_acc = sum(c1_f_acc) / len(c1_f_acc)
+            male_test_acc = sum(c1_m_acc) / len(c1_m_acc)
             print('Client: ', c + 1)
+            print('*******************')
+            print('*       all       *')
+            print('*******************')
             print('Test Accuracy: {0:1.3f};'.format(c2_test_acc[len(c2_test_acc) - 1]))
             print('Test Error: {0:1.3f};'.format(c2_test_error[len(c2_test_error) - 1]))
             print('TP: ', c2_tp[len(c2_tp) - 1], 'FP: ', c2_fp[len(c2_fp) - 1], 'TN: ', c2_tn[len(c2_tn) - 1], 'FN: ',
                   c2_fn[len(c2_fn) - 1])
+            print('EOD: {0:1.4f}'.format(c2_EOD[len(c2_EOD) - 1]))
+            print('SPD: {0:1.4f}'.format(c2_SPD[len(c2_SPD) - 1]))
+            print('AOD: {0:1.4f}'.format(c2_AOD[len(c2_AOD) - 1]))
             print('F1: {0:1.3f}'.format(c2_f1[len(c2_f1) - 1]))
+            print("")
+            print('**********************')
+            print('*       Female       *')
+            print('**********************')
+            print('Test Accuracy: {0:1.3f}'.format(c2_f_acc[len(c2_f_acc) - 1]))
+            print('Test Error: {0:1.3f}'.format(c2_f_err[len(c2_f_err) - 1]))
+            print('TP: ', c2_f_tp[len(c2_f_tp) - 1], 'FP: ', c2_f_fp[len(c2_f_fp) - 1], 'TN: ',
+                  c2_f_tn[len(c2_f_tn) - 1], 'FN: ',
+                  c2_f_fn[len(c2_f_fn) - 1])
+            print('F1: {0:1.3f}'.format(c2_f_f1[len(c2_f_f1) - 1]))
+            print("")
+            print('********************')
+            print('*       Male       *')
+            print('********************')
+            print('Test Accuracy: {0:1.3f}'.format(c2_m_acc[len(c2_m_acc) - 1]))
+            print('Test Error: {0:1.3f}'.format(c2_m_err[len(c2_m_err) - 1]))
+            print('TP: ', c2_m_tp[len(c2_m_tp) - 1], 'FP: ', c2_m_fp[len(c2_m_fp) - 1], 'TN: ',
+                  c2_m_tn[len(c2_m_tn) - 1], 'FN: ',
+                  c2_m_fn[len(c2_m_fn) - 1])
+            print('F1: {0:1.3f}'.format(c2_m_f1[len(c2_m_f1) - 1]))
+
             for col, encoder in encoders.items():
                 c2_all_results.loc[:, col] = encoder.inverse_transform(c2_all_results[col])
 
