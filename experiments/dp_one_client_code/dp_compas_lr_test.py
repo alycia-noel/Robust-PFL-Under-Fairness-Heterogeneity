@@ -2,6 +2,7 @@ import time
 import random
 import os
 import warnings
+import json
 import torch
 import torch.nn as nn
 import numpy as np
@@ -119,15 +120,15 @@ all_results = []
 data_train = TabularData(d_train[features].values, d_train[decision].values, d_train[sensitive].values)
 data_test = TabularData(d_test[features].values, d_test[decision].values, d_test[sensitive].values)
 
-#learning_rate = [.1, .05, .01, .005, .003, .001, .0005, .0003, .0001]
-#batch_size = [64, 128]
-#alpha = [5, 10, 15, 20, 25, 30, 25, 40, 50, 60, 70, 80, 90]
-#epochs = [25, 50, 100, 150, 200]
+learning_rate = [.1, .05, .01, .005, .003, .001, .0005, .0003, .0001]
+batch_size = [64, 128]
+alpha = [5, 10, 15, 20, 25, 30, 25, 40, 50, 60, 70, 80, 90]
+epochs = [25, 50, 100, 150, 200]
 
-learning_rate = [.001]
-batch_size = [128]
-alpha = [10]
-epochs = [5, 10, 15]
+#learning_rate = [.001]
+#batch_size = [128]
+#alpha = [10]
+#epochs = [5, 10, 15]
 
 for i, lr in enumerate(learning_rate):
     for j, bs in enumerate(batch_size):
@@ -328,18 +329,23 @@ for i, lr in enumerate(learning_rate):
                 all_results.append(add_to_all)
                 print(add_to_all)
 
-best_eod = -10000
-best_acc = 0
-best_index = 0
+# best_eod = -10000
+# best_acc = 0
+# best_index = 0
+#
+# for i in range(len(all_results)):
+#     if all_results[i].get('avg_acc') >= best_acc:
+#         if abs(all_results[i].get('EOD')) < abs(best_eod):
+#             best_acc = all_results[i].get('avg_acc')
+#             best_eod = all_results[i].get('EOD')
+#             best_index = i
 
-for i in range(len(all_results)):
-    if all_results[i].get('avg_acc') >= best_acc:
-        if float(all_results[i].get('EOD')) < float(best_eod):
-            best_acc = all_results[i].get('avg_acc')
-            best_eod = all_results[i].get('EOD')
-            best_index = i
+textfile = open("all_results.txt", "w")
+for element in all_results:
+    textfile.write(json.dumps(all_results))
+textfile.close()
 
-print(all_results[i])
+#print(all_results[i])
 
 
 
