@@ -1,6 +1,5 @@
 import time
 import random
-import math
 import os
 import warnings
 import torch
@@ -113,230 +112,270 @@ for col in ['race', 'sex', 'c_charge_degree', 'score_text', 'age_cat']:
     encoders[col] = LabelEncoder().fit(compas[col])
     compas.loc[:, col] = encoders[col].transform(compas[col])
 
-results = []
-
 d_train, d_test = train_test_split(compas, test_size=300)
+
+all_results = []
 
 data_train = TabularData(d_train[features].values, d_train[decision].values, d_train[sensitive].values)
 data_test = TabularData(d_test[features].values, d_test[decision].values, d_test[sensitive].values)
 
-model = LR(input_size=9)
-model = model.double()
+#learning_rate = [.1, .05, .01, .005, .003, .001, .0005, .0003, .0001]
+#batch_size = [64, 128]
+#alpha = [5, 10, 15, 20, 25, 30, 25, 40, 50, 60, 70, 80, 90]
+#epochs = [25, 50, 100, 150, 200]
 
-# for param in model.parameters():
-#     nn.init.normal_(param, 0, 1e-7)
+learning_rate = [.001]
+batch_size = [128]
+alpha = [10]
+epochs = [5, 10, 15]
 
-train_loader = DataLoader(data_train, shuffle = True, batch_size = 64) #32
-test_loader = DataLoader(data_test, shuffle = False, batch_size= 64)
+for i, lr in enumerate(learning_rate):
+    for j, bs in enumerate(batch_size):
+        for k, alpha in enumerate(alpha):
+            for m, eps in enumerate(epochs):
+                mid_results = []
+                for iter in range(5):
+                    model = LR(input_size=9)
+                    model = model.double()
 
-optimizer = torch.optim.Adam(model.parameters(), lr = .002, betas=(.9,.999), eps=1e-08)
-#optimizer = torch.optim.SGD(model.parameters(), lr=0.000001, momentum=.5, weight_decay=3e-5)
-#optimizer = torch.optim.SGD(model.parameters(),lr=0.00001)
-loss = nn.BCEWithLogitsLoss(reduction='mean')#nn.BCELoss(reduction='mean')   #binary logarithmic loss function
-dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=50)
+                    # for param in model.parameters():
+                    #     nn.init.normal_(param, 0, 1e-7)
 
-no_batches = len(train_loader)
-#making sure we update
-loss_values =[]
-test_loss_values = []
-test_error, F_ERR, M_ERR = [], [], []
+                    train_loader = DataLoader(data_train, shuffle = True, batch_size = bs) #64
+                    test_loader = DataLoader(data_test, shuffle = False, batch_size= bs)
 
-acc_values, test_acc, F_ACC, M_ACC = [], [], [], []
+                    optimizer = torch.optim.Adam(model.parameters(), lr = lr, betas=(.9,.999), eps=1e-08) #.005
+                    loss = nn.BCEWithLogitsLoss(reduction='mean')   #binary logarithmic loss function
+                    dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=alpha) #20
 
-tp, tn, fp, fn, f1 = [], [], [], [], []
-F_TP, F_FP, F_TN, F_FN, F_F1 = [], [], [], [], []
-M_TP, M_FP, M_TN, M_FN, M_F1 = [], [], [], [], []
-EOD, SPD, AOD = [], [], []
+                    no_batches = len(train_loader)
+                    results = []
+                    loss_values =[]
+                    test_loss_values = []
+                    test_error, F_ERR, M_ERR = [], [], []
 
-times = []
-#torch.cuda.amp.autocast(enabled=False)
-# Train model
-model.train() #warm-up
-torch.cuda.synchronize()
-for epoch in range(100):
-    start = time.time()
-    running_loss = 0.0
-    correct = 0.0
-    total = 0.0
-    for i, (x, y, s) in enumerate(train_loader):
-        optimizer.zero_grad()
-        y_ = model(x, test=True)
-        err = loss(y_.flatten(), y) + dp_loss(x.float(), y_.float(), s.float())
-        running_loss += err.item() * x.size(0)
-        err.backward()
-        #torch.nn.utils.clip_grad_norm_(model.parameters(), 3)
-        optimizer.step()
+                    acc_values, test_acc, F_ACC, M_ACC = [], [], [], []
 
-        preds = y_.round().reshape(1, len(y_))
-        correct += (preds.eq(y)).sum().item()
+                    tp, tn, fp, fn, f1 = [], [], [], [], []
+                    F_TP, F_FP, F_TN, F_FN, F_F1 = [], [], [], [], []
+                    M_TP, M_FP, M_TN, M_FN, M_F1 = [], [], [], [], []
+                    EOD, SPD, AOD = [], [], []
 
-    accuracy = (100 * correct / len(data_train))
-    acc_values.append(accuracy)
-    loss_values.append(running_loss / len(train_loader))
+                    times = []
+                    #torch.cuda.amp.autocast(enabled=False)
+                    # Train model
+                    model.train() #warm-up
+                    torch.cuda.synchronize()
+                    for epoch in range(eps):
+                        start = time.time()
+                        running_loss = 0.0
+                        correct = 0.0
+                        total = 0.0
+                        for i, (x, y, s) in enumerate(train_loader):
+                            optimizer.zero_grad()
+                            y_ = model(x, test=True)
+                            err = loss(y_.flatten(), y) + dp_loss(x.float(), y_.float(), s.float())
+                            running_loss += err.item() * x.size(0)
+                            err.backward()
+                            optimizer.step()
 
-    torch.cuda.synchronize()
-    end = time.time()
-    elapsed = end - start
-    times.append(elapsed)
-    print('Epoch: {0}/{1};\t Loss: {2:1.3f};\tAcc:{3:1.3f};\tTime:{4:1.2f}'.format(epoch + 1, 100, running_loss / len(train_loader), accuracy, elapsed))
+                            preds = y_.round().reshape(1, len(y_))
+                            correct += (preds.eq(y)).sum().item()
 
-    total_time = sum(times)
+                        accuracy = (100 * correct / len(data_train))
+                        acc_values.append(accuracy)
+                        loss_values.append(running_loss / len(train_loader))
 
-    # Eval Model
-    model.eval()
-    predictions = []
-    running_loss_test = 0
-    TP, FP, FN, TN = 0, 0, 0, 0
-    f_tp, f_fp, f_tn, f_fn = 0, 0, 0, 0
-    m_tp, m_fp, m_tn, m_fn = 0, 0, 0, 0
-    total = 0.0
-    correct = 0.0
-    with torch.no_grad():
-        for i, (x, y, s) in enumerate(test_loader):
-            pred = model(x, test=True)
-            test_err = loss(pred.flatten(), y)
-            test_err = test_err.mean()
-            running_loss_test += test_err.item() * x.size(0)
+                        end = time.time()
+                        elapsed = end - start
+                        times.append(elapsed)
+                        #print('Epoch: {0}/{1};\t Loss: {2:1.3f};\tAcc:{3:1.3f};\tTime:{4:1.2f}'.format(epoch + 1, 50, running_loss / len(train_loader), accuracy, elapsed))
 
-            preds = pred.round().reshape(1, len(pred))
-            predictions.extend(preds.flatten().numpy())
-            correct += (preds.eq(y)).sum().item()
+                        total_time = sum(times)
 
-            predicted_prediction = preds.type(torch.IntTensor).numpy().reshape(-1)
-            labels_pred = y.type(torch.IntTensor).numpy().reshape(-1)
+                        # Eval Model
+                        model.eval()
+                        predictions = []
+                        running_loss_test = 0
+                        TP, FP, FN, TN = 0, 0, 0, 0
+                        f_tp, f_fp, f_tn, f_fn = 0, 0, 0, 0
+                        m_tp, m_fp, m_tn, m_fn = 0, 0, 0, 0
+                        total = 0.0
+                        correct = 0.0
+                        with torch.no_grad():
+                            for i, (x, y, s) in enumerate(test_loader):
+                                pred = model(x, test=True)
+                                test_err = loss(pred.flatten(), y)
+                                test_err = test_err.mean()
+                                running_loss_test += test_err.item() * x.size(0)
 
-            for i in range(len(s)):
-                if s[i].item() == 0:
-                    if predicted_prediction[i] == 1 and labels_pred[i] == 1:
-                        f_tp += 1
-                        TP += 1
-                    elif predicted_prediction[i] == 1 and labels_pred[i] == 0:
-                        f_fp += 1
-                        FP += 1
-                    elif predicted_prediction[i] == 0 and labels_pred[i] == 0:
-                        f_tn += 1
-                        TN += 1
-                    elif predicted_prediction[i] == 0 and labels_pred[i] == 1:
-                        f_fn += 1
-                        FN += 1
-                else:
-                    if predicted_prediction[i] == 1 and labels_pred[i] == 1:
-                        m_tp += 1
-                        TP += 1
-                    elif predicted_prediction[i] == 1 and labels_pred[i] == 0:
-                        m_fp += 1
-                        FP += 1
-                    elif predicted_prediction[i] == 0 and labels_pred[i] == 0:
-                        m_tn += 1
-                        TN += 1
-                    elif predicted_prediction[i] == 0 and labels_pred[i] == 1:
-                        m_fn += 1
-                        FN += 1
+                                preds = pred.round().reshape(1, len(pred))
+                                predictions.extend(preds.flatten().numpy())
+                                correct += (preds.eq(y)).sum().item()
 
-    test_loss_values.append(running_loss_test / len(test_loader))
+                                predicted_prediction = preds.type(torch.IntTensor).numpy().reshape(-1)
+                                labels_pred = y.type(torch.IntTensor).numpy().reshape(-1)
 
-    f1_score_prediction = TP / (TP + (FP + FN) / 2)
-    f1_female = f_tp / (f_tp + (f_fp + f_fn) / 2)
-    f1_male = m_tp / (m_tp + (m_fp + m_fn) / 2)
+                                for i in range(len(s)):
+                                    if s[i].item() == 0:
+                                        if predicted_prediction[i] == 1 and labels_pred[i] == 1:
+                                            f_tp += 1
+                                            TP += 1
+                                        elif predicted_prediction[i] == 1 and labels_pred[i] == 0:
+                                            f_fp += 1
+                                            FP += 1
+                                        elif predicted_prediction[i] == 0 and labels_pred[i] == 0:
+                                            f_tn += 1
+                                            TN += 1
+                                        elif predicted_prediction[i] == 0 and labels_pred[i] == 1:
+                                            f_fn += 1
+                                            FN += 1
+                                    else:
+                                        if predicted_prediction[i] == 1 and labels_pred[i] == 1:
+                                            m_tp += 1
+                                            TP += 1
+                                        elif predicted_prediction[i] == 1 and labels_pred[i] == 0:
+                                            m_fp += 1
+                                            FP += 1
+                                        elif predicted_prediction[i] == 0 and labels_pred[i] == 0:
+                                            m_tn += 1
+                                            TN += 1
+                                        elif predicted_prediction[i] == 0 and labels_pred[i] == 1:
+                                            m_fn += 1
+                                            FN += 1
 
-    f1.append(f1_score_prediction)
-    F_F1.append(f1_female)
-    M_F1.append(f1_male)
+                        test_loss_values.append(running_loss_test / len(test_loader))
 
-    if epoch == 49:
-        plt.plot(loss_values, label='Train Loss')
-        plt.plot(test_loss_values, label='Test Loss')
-        plt.xlabel('Epoch')
-        plt.ylabel('Loss')
-        plt.title('Loss over Epochs for LR Model on COMPAS')
-        plt.legend(loc="upper right")
-        plt.show()
+                        f1_score_prediction = TP / (TP + (FP + FN) / 2)
+                        f1_female = f_tp / (f_tp + (f_fp + f_fn) / 2)
+                        f1_male = m_tp / (m_tp + (m_fp + m_fn) / 2)
 
-    accuracy = (TP + TN) / (TP + FP + FN + TN)
-    f_acc = (f_tp + f_tn) / (f_tp + f_fp + f_fn + f_tn)
-    m_acc = (m_tp + m_tn) / (m_tp + m_fp + m_fn + m_tn)
+                        f1.append(f1_score_prediction)
+                        F_F1.append(f1_female)
+                        M_F1.append(f1_male)
 
-    error = (FP + FN) / (TP + FP + FN + TN)
-    f_err = (f_fp + f_fn) / (f_tp + f_fp + f_fn + f_tn)
-    m_err = (m_fp + m_fn) / (m_tp + m_fp + m_fn + m_tn)
+                        # if epoch == 49:
+                        #     plt.plot(loss_values, label='Train Loss')
+                        #     plt.plot(test_loss_values, label='Test Loss')
+                        #     plt.xlabel('Epoch')
+                        #     plt.ylabel('Loss')
+                        #     plt.title('Loss over Epochs for LR Model on COMPAS')
+                        #     plt.legend(loc="upper right")
+                        #     plt.show()
 
-    if f_fp == 0 and f_tn == 0:
-        AOD.append((((f_tp / (f_tp + f_fn)) - (m_tp / (m_tp + m_fn))) + (0 - (m_fp / (m_fp + m_tn)))) / 2)
-    else:
-        AOD.append((((f_tp / (f_tp + f_fn)) - (m_tp / (m_tp + m_fn))) + ((f_fp / (f_fp + f_tn)) - (m_fp / (m_fp + m_tn)))) / 2)  # average odds difference
-    EOD.append((f_tp / (f_tp + f_fn)) - (m_tp / (m_tp + m_fn)))  # equal opportunity difference
-    SPD.append((f_tp + f_fp) / (f_tp + f_fp + f_tn + f_fn) - (m_tp + m_fp) / (m_tp + m_fp + m_tn + m_fn))
+                        accuracy = (TP + TN) / (TP + FP + FN + TN)
+                        f_acc = (f_tp + f_tn) / (f_tp + f_fp + f_fn + f_tn)
+                        m_acc = (m_tp + m_tn) / (m_tp + m_fp + m_fn + m_tn)
 
-    res = (
-        pd  .DataFrame(columns = features, index = d_test.index)
-            .add_suffix('_partial')
-            .join(d_test)
-            .assign(prediction=predictions)
-            .assign(round=epoch)
-        )
+                        error = (FP + FN) / (TP + FP + FN + TN)
+                        f_err = (f_fp + f_fn) / (f_tp + f_fp + f_fn + f_tn)
+                        m_err = (m_fp + m_fn) / (m_tp + m_fp + m_fn + m_tn)
+
+                        if f_fp == 0 and f_tn == 0:
+                            AOD.append((((f_tp / (f_tp + f_fn)) - (m_tp / (m_tp + m_fn))) + (0 - (m_fp / (m_fp + m_tn)))) / 2)
+                        else:
+                            AOD.append((((f_tp / (f_tp + f_fn)) - (m_tp / (m_tp + m_fn))) + ((f_fp / (f_fp + f_tn)) - (m_fp / (m_fp + m_tn)))) / 2)  # average odds difference
+                        EOD.append((f_tp / (f_tp + f_fn)) - (m_tp / (m_tp + m_fn)))  # equal opportunity difference
+                        SPD.append((f_tp + f_fp) / (f_tp + f_fp + f_tn + f_fn) - (m_tp + m_fp) / (m_tp + m_fp + m_tn + m_fn))
+
+                        res = (
+                            pd  .DataFrame(columns = features, index = d_test.index)
+                                .add_suffix('_partial')
+                                .join(d_test)
+                                .assign(prediction=predictions)
+                                .assign(round=epoch)
+                            )
 
 
-    results.append(res)
-    test_acc.append(accuracy)
-    F_ACC.append(f_acc)
-    M_ACC.append(m_acc)
-    test_error.append(error)
-    F_ERR.append(f_err)
-    M_ERR.append(m_err)
+                        results.append(res)
+                        test_acc.append(accuracy)
+                        F_ACC.append(f_acc)
+                        M_ACC.append(m_acc)
+                        test_error.append(error)
+                        F_ERR.append(f_err)
+                        M_ERR.append(m_err)
 
-    tn.append(TN)
-    tp.append(TP)
-    fn.append(FN)
-    fp.append(FP)
+                        tn.append(TN)
+                        tp.append(TP)
+                        fn.append(FN)
+                        fp.append(FP)
 
-    F_TN.append(f_tn)
-    F_TP.append(f_tp)
-    F_FN.append(f_fn)
-    F_FP.append(f_fp)
+                        F_TN.append(f_tn)
+                        F_TP.append(f_tp)
+                        F_FN.append(f_fn)
+                        F_FP.append(f_fp)
 
-    M_TN.append(m_tn)
-    M_TP.append(m_tp)
-    M_FN.append(m_fn)
-    M_FP.append(m_fp)
+                        M_TN.append(m_tn)
+                        M_TP.append(m_tp)
+                        M_FN.append(m_fn)
+                        M_FP.append(m_fp)
 
-results = pd.concat(results)
-average_test_acc = sum(test_acc) / len(test_acc)
-female_test_acc = sum(F_ACC) / len(F_ACC)
-male_test_acc = sum(M_ACC) / len(M_ACC)
+                    results = pd.concat(results)
+                    average_test_acc = sum(test_acc) / len(test_acc)
+                    female_test_acc = sum(F_ACC) / len(F_ACC)
+                    male_test_acc = sum(M_ACC) / len(M_ACC)
 
-print('*******************')
-print('*       all       *')
-print('*******************')
-print('Test Accuracy: {0:1.3f}'.format(test_acc[len(test_acc) - 1]))
-print('Test Error: {0:1.3f}'.format(test_error[len(test_error) - 1]))
-print('TP: ', tp[len(tp) - 1], 'FP: ', fp[len(fp) - 1], 'TN: ', tn[len(tn) - 1], 'FN: ', fn[len(fn) - 1])
-print('EOD: {0:1.4f}'.format(EOD[len(EOD) - 1]))
-print('SPD: {0:1.4f}'.format(SPD[len(SPD) - 1]))
-print('AOD: {0:1.4f}'.format(AOD[len(AOD) - 1]))
-print('F1: {0:1.3f}'.format(f1[len(f1) - 1]))
-print("")
-print('**********************')
-print('*       Female       *')
-print('**********************')
-print('Test Accuracy: {0:1.3f}'.format(F_ACC[len(F_ACC) - 1]))
-print('Test Error: {0:1.3f}'.format(F_ERR[len(F_ERR) - 1]))
-print('TP: ', F_TP[len(F_TP) - 1], 'FP: ', F_FP[len(F_FP) - 1], 'TN: ', F_TN[len(F_TN) - 1], 'FN: ',
-      F_FN[len(F_FN) - 1])
-print('F1: {0:1.3f}'.format(F_F1[len(F_F1) - 1]))
-print("")
-print('********************')
-print('*       Male       *')
-print('********************')
-print('Test Accuracy: {0:1.3f}'.format(M_ACC[len(M_ACC) - 1]))
-print('Test Error: {0:1.3f}'.format(M_ERR[len(M_ERR) - 1]))
-print('TP: ', M_TP[len(M_TP) - 1], 'FP: ', M_FP[len(M_FP) - 1], 'TN: ', M_TN[len(M_TN) - 1], 'FN: ',
-      M_FN[len(M_FN) - 1])
-print('F1: {0:1.3f}'.format(M_F1[len(M_F1) - 1]))
+                    add_to_dict = {'lr': lr, 'bs': bs, 'alpha': alpha, 'epoch': epoch, 'avg_acc': average_test_acc, 'EOD': EOD[len(EOD) - 1], 'AOD': AOD[len(AOD) - 1], 'SPD': SPD[len(SPD) - 1]}
+                    mid_results.append(add_to_dict)
+                    #print(mid_results)
 
-print('Train Time: {0:1.2f}'.format(total_time))
+                all_avg = sum(d['avg_acc'] for d in mid_results) / len(mid_results)
+                all_eod = sum(d['EOD'] for d in mid_results) / len(mid_results)
+                all_aod = sum(d['AOD'] for d in mid_results) / len(mid_results)
+                all_spd = sum(d['SPD'] for d in mid_results) / len(mid_results)
 
-for col, encoder in encoders.items():
-    results.loc[:, col] = encoder.inverse_transform(results[col])
+                add_to_all = {'lr': lr, 'bs': bs, 'alpha': alpha, 'epoch': epoch, 'avg_acc': all_avg, 'EOD': all_eod, 'AOD': all_aod, 'SPD': all_spd}
+                all_results.append(add_to_all)
+                print(add_to_all)
 
-plot_roc_curves(results, 'prediction', 'two_year_recid', size=(7, 5), fname='./results/roc.png')
+best_eod = -10000
+best_acc = 0
+best_index = 0
+
+for i in range(len(all_results)):
+    if all_results[i].get('avg_acc') >= best_acc:
+        if float(all_results[i].get('EOD')) < float(best_eod):
+            best_acc = all_results[i].get('avg_acc')
+            best_eod = all_results[i].get('EOD')
+            best_index = i
+
+print(all_results[i])
+
+
+
+                # print('*******************')
+                # print('*       all       *')
+                # print('*******************')
+                # print('Test Accuracy: {0:1.3f}'.format(test_acc[len(test_acc) - 1]))
+                # print('Test Error: {0:1.3f}'.format(test_error[len(test_error) - 1]))
+                # print('TP: ', tp[len(tp) - 1], 'FP: ', fp[len(fp) - 1], 'TN: ', tn[len(tn) - 1], 'FN: ', fn[len(fn) - 1])
+                # print('EOD: {0:1.4f}'.format(EOD[len(EOD) - 1]))
+                # print('SPD: {0:1.4f}'.format(SPD[len(SPD) - 1]))
+                # print('AOD: {0:1.4f}'.format(AOD[len(AOD) - 1]))
+                # print('F1: {0:1.3f}'.format(f1[len(f1) - 1]))
+                # print("")
+                # print('**********************')
+                # print('*       Female       *')
+                # print('**********************')
+                # print('Test Accuracy: {0:1.3f}'.format(F_ACC[len(F_ACC) - 1]))
+                # print('Test Error: {0:1.3f}'.format(F_ERR[len(F_ERR) - 1]))
+                # print('TP: ', F_TP[len(F_TP) - 1], 'FP: ', F_FP[len(F_FP) - 1], 'TN: ', F_TN[len(F_TN) - 1], 'FN: ',
+                #       F_FN[len(F_FN) - 1])
+                # print('F1: {0:1.3f}'.format(F_F1[len(F_F1) - 1]))
+                # print("")
+                # print('********************')
+                # print('*       Male       *')
+                # print('********************')
+                # print('Test Accuracy: {0:1.3f}'.format(M_ACC[len(M_ACC) - 1]))
+                # print('Test Error: {0:1.3f}'.format(M_ERR[len(M_ERR) - 1]))
+                # print('TP: ', M_TP[len(M_TP) - 1], 'FP: ', M_FP[len(M_FP) - 1], 'TN: ', M_TN[len(M_TN) - 1], 'FN: ',
+                #       M_FN[len(M_FN) - 1])
+                # print('F1: {0:1.3f}'.format(M_F1[len(M_F1) - 1]))
+                #
+                # print('Train Time: {0:1.2f}'.format(total_time))
+                #
+                # for col, encoder in encoders.items():
+                #     results.loc[:, col] = encoder.inverse_transform(results[col])
+                #
+                # plot_roc_curves(results, 'prediction', 'two_year_recid', size=(7, 5), fname='./results/roc.png')
 

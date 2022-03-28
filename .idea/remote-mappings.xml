@@ -4,6 +4,13 @@
     <list>
       <list>
         <remote-mappings server-id="python@sftp://ancarey@sailor.ddns.uark.edu:22/bin/python" />
+        <remote-mappings server-id="python@sftp://ancarey@sailor.ddns.uark.edu:22/home/ancarey/adaptive-hypernets/bin/python">
+          <settings>
+            <list>
+              <mapping local-root="$PROJECT_DIR$" remote-root="/home/ancarey/FairFLHN" />
+            </list>
+          </settings>
+        </remote-mappings>
       </list>
     </list>
   </component>

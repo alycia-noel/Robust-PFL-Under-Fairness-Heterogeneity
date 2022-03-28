@@ -8,8 +8,10 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader
-import torch.nn.functional as F
+from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import roc_curve, auc, confusion_matrix
+from skorch import NeuralNetClassifier
+from skorch.callbacks import EpochScoring
 
 warnings.filterwarnings("ignore")
 
@@ -34,10 +36,8 @@ class LR(nn.Module):
         self.fc1 = nn.Linear(input_size, 1)
 
     def forward(self, x):
-        #x_flat = x.flatten()
         y = self.fc1(x)
         out = torch.sigmoid(y)
-
         return out
 
 
@@ -101,7 +101,6 @@ for col in ['race', 'sex', 'c_charge_degree', 'score_text', 'age_cat']:
     compas.loc[:, col] = encoders[col].transform(compas[col])
 
 results = []
-
 
 d_train, d_test = train_test_split(compas, test_size=617)
 
