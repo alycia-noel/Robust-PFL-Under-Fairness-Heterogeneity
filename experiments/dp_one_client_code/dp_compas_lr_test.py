@@ -136,6 +136,7 @@ loss = nn.BCEWithLogitsLoss(reduction='mean')#nn.BCELoss(reduction='mean')   #bi
 dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=50)
 
 no_batches = len(train_loader)
+#making sure we update
 loss_values =[]
 test_loss_values = []
 test_error, F_ERR, M_ERR = [], [], []
