@@ -12,7 +12,7 @@ from tqdm import trange # for the progress bar
 
 from experiments import HyperCOMPASNN, TargetAndContextCOMPASNN # loads the model architecture
 from experiments import BaseNodes # loads the client generator
-from experiments.extra.utils import get_device, set_logger, set_seed  # loads extra tools
+from experiments.dp_one_client_code.utils import get_device, set_logger, set_seed  # loads extra tools
 
 import warnings
 torch.autograd.set_detect_anomaly(True)

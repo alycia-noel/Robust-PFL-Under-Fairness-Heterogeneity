@@ -1,7 +1,7 @@
 import time
 import warnings
+import os
 import torch
-import torchvision.models as models
 import torch.nn as nn
 import numpy as np
 import pandas as pd
@@ -10,7 +10,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader
 from collections import OrderedDict
-import torch.nn.functional as F
+
 from sklearn.metrics import roc_curve, auc, confusion_matrix
 
 warnings.filterwarnings("ignore")
@@ -30,81 +30,7 @@ class TabularData(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
 
-class combo(nn.Module):
-    def __init__(self, input_size, vector_size):
-        super(combo, self).__init__()
-        self.input_size = input_size
-        self.vector_size = vector_size
-        self.hidden_size = 10
 
-        # Logistic Regression
-        self.fc1 = nn.Linear(self.input_size + self.vector_size, 1)
-
-        # Context Network
-        self.context_fc1 = nn.Linear(self.input_size, self.hidden_size)
-        self.context_relu1 = nn.LeakyReLU()
-        self.context_fc2 = nn.Linear(self.hidden_size, self.hidden_size)
-        self.context_relu2 = nn.LeakyReLU()
-        self.context_fc3 = nn.Linear(self.hidden_size, self.vector_size)
-
-    def forward(self, x, context_only):
-        # Pass through context network
-        hidden1 = self.context_fc1(x)
-        relu1 = self.context_relu1(hidden1)
-        hidden2 = self.context_fc2(relu1)
-        relu2 = self.context_relu2(hidden2)
-        context_vector = self.context_fc3(relu2)
-
-        ###### adaptive prediction
-        avg_context_vector = torch.mean(context_vector, dim=0)
-        prediction_vector = avg_context_vector.expand(len(x), self.vector_size)
-        prediction_vector = torch.cat((prediction_vector, x), dim=1)
-
-        if context_only:
-            return context_vector, avg_context_vector, prediction_vector
-
-        x1 = self.fc1(prediction_vector)
-        y = torch.sigmoid(x1)
-        return y
-
-class HyperNet(nn.Module):
-    def __init__(self, vector_size, hidden_dim):
-        super().__init__()
-
-        self.hidden_dim = hidden_dim
-        self.vector_size = vector_size
-
-        n_hidden = 2
-
-        layers = [
-            nn.Linear(self.vector_size, hidden_dim),  # [13, 100]
-        ]
-        for _ in range(n_hidden):
-            layers.append(nn.LeakyReLU(inplace=True))
-            layers.append(
-                nn.Linear(hidden_dim, hidden_dim)
-            )
-        layers.append(nn.Linear(hidden_dim, hidden_dim))
-
-        self.mlp = nn.Sequential(*layers)
-
-        self.fc1_weights = nn.Linear(hidden_dim, (2*self.vector_size)) #[input size, 1]
-        self.fc1_bias = nn.Linear(hidden_dim, 1)
-
-
-    # Do a forward pass
-    def forward(self, context_vec):
-        context_vec = context_vec.view(1,self.vector_size) #[1,13]
-
-        # Generate the weight output features by passing the context_vector through the hypernetwork mlp
-        features = self.mlp(context_vec)
-
-        weights = OrderedDict({
-            "fc1.weight": self.fc1_weights(features).view(1,2*self.vector_size),
-            "fc1.bias": self.fc1_bias(features).view(-1),
-        })
-
-        return weights
 
 def plot_roc_curves(results, pred_col, resp_col, c, size=(7, 5), fname=None):
     plt.clf()
@@ -117,7 +43,6 @@ def plot_roc_curves(results, pred_col, resp_col, c, size=(7, 5), fname=None):
         plt.plot(fpr, tpr, '-', color='orange', lw=0.5)
 
     fpr, tpr, _ = roc_curve(results[resp_col], results[pred_col])
-
     roc_auc = auc(fpr, tpr)
     plt.plot(fpr, tpr, '-', color='darkorange', lw=1.5, label='ROC curve (area = %0.2f)' % roc_auc, )
     plt.plot([0, 1], [0, 1], color='navy', lw=1.5, linestyle='--')
@@ -127,7 +52,7 @@ def plot_roc_curves(results, pred_col, resp_col, c, size=(7, 5), fname=None):
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
     plt.legend(loc="lower right")
-    title_roc = 'ROC for FL HN Adaptive LR on COMPAS - Client' + str(c + 1)
+    title_roc = 'ROC for FL HN Adaptive NN on COMPAS - Client' + str(c + 1)
     plt.title(title_roc)
     plt.show()
 
@@ -182,23 +107,24 @@ data_train_2 = TabularData(d_train_2[features_2].values, d_train_2[decision_2].v
 data_test_2 = TabularData(d_test_2[features_2].values, d_test_2[decision_2].values)
 
 c1_model = combo(input_size=10, vector_size=10)
-c2_model = combo(input_size = 10, vector_size = 10)
-hnet = HyperNet(vector_size=10, hidden_dim=10) #100
+c2_model = combo(input_size = 10, vector_size=10)
+hnet = HyperNet(vector_size=10, hidden_dim=10)
 c1_model = c1_model.double()
 c2_model = c2_model.double()
 hnet = hnet.double()
 
 no_cuda=False
 gpus='4'
-device = torch.device(f"cuda:{gpus}" if torch.cuda.is_available() and not no_cuda else "cpu")
+device = torch.cuda.set_device(4)
+#device = torch.device(f"cuda:{gpus}" if torch.cuda.is_available() and not no_cuda else "cpu")
 
 hnet=hnet.to(device)
 c1_model=c1_model.to(device)
-c2_model= c2_model.to(device)
+c2_model=c2_model.to(device)
 
-optimizer = torch.optim.Adam(hnet.parameters(), lr=3e-2, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
-c1_inner_optimizer = torch.optim.Adam(c1_model.parameters(), lr = 5.e-4, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
-c2_inner_optimizer = torch.optim.Adam(c2_model.parameters(), lr = 5.e-4, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
+optimizer = torch.optim.Adam(hnet.parameters(), lr=1e-2, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False) #3e-2, .01
+c1_inner_optimizer = torch.optim.Adam(c1_model.parameters(), lr = .00015, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
+c2_inner_optimizer = torch.optim.Adam(c2_model.parameters(), lr = .0005, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
 
 loss = nn.BCELoss(reduction='mean')   #binary logarithmic loss function
 
@@ -224,15 +150,14 @@ c2_f1, c2_f_f1, c2_m_f1 = [], [], []
 c2_EOD, c2_SPD, c2_AOD = [], [], []
 c2_results, c2_final_results, c2_final_final_results, c2_all_results = [], [], [], []
 
-
 # Train model
-steps = 10
-epochs = 10
+steps = 6#10#9#10
+epochs = 25#30
 
+print("Start")
 torch.cuda.synchronize()
-print("start")
 for step in range(steps):
-    #Need to save model so client both have the same starting point
+
     torch.save(hnet.state_dict(), 'hnet_baseline_weights.pth')
 
     for c in range(clients):
@@ -240,24 +165,21 @@ for step in range(steps):
         if c == 0:
             print("")
             print('#######################')
-            print('On Outer Iteration: ', step+1)
+            print('On Outer Iteration: ', step + 1)
             print('#######################')
-
-        if c == 0:
             data_train = data_train_1
             data_test = data_test_1
         else:
             data_train = data_train_2
             data_test = data_test_2
 
-        train_loader = DataLoader(data_train, shuffle=True, batch_size=32)
-        test_loader = DataLoader(data_test, shuffle=False, batch_size=32)
+        train_loader = DataLoader(data_train, shuffle=True, batch_size=16)
+        test_loader = DataLoader(data_test, shuffle=False, batch_size=16)
 
         no_batches = len(train_loader)
 
-        #load baseline
+        # load baseline
         hnet.load_state_dict(torch.load('hnet_baseline_weights.pth'))
-
         hnet.train()
         torch.cuda.synchronize()
         start_epoch = time.time()
@@ -276,6 +198,7 @@ for step in range(steps):
             total = 0.0
 
             for i, (x, y) in enumerate(train_loader):
+                # Generate weights on first round of the inner loop
                 if epoch == 0 and i == 0:
                     context_vectors, avg_context_vector, prediction_vector = model(x.to(device), context_only=True)
 
@@ -301,7 +224,6 @@ for step in range(steps):
                 correct += (preds.eq(y)).sum().item()
 
             accuracy = (100 * correct / len(data_train))
-
             if c == 0:
                 c1_acc_values.append(accuracy)
                 c1_loss_values.append(running_loss / len(train_loader))
@@ -315,6 +237,8 @@ for step in range(steps):
             model.eval()
             predictions = []
             running_loss_test = 0
+            predictions = []
+            running_loss_test = 0
             TP, FP, FN, TN = 0, 0, 0, 0
             f_tp, f_fp, f_tn, f_fn = 0, 0, 0, 0
             m_tp, m_fp, m_tn, m_fn = 0, 0, 0, 0
@@ -326,6 +250,7 @@ for step in range(steps):
                     test_err = loss(pred.flatten(), y.to(device))
                     test_err = test_err.mean()
                     running_loss_test += test_err.item() * x.size(0)
+
                     preds = pred.detach().cpu().round().reshape(1, len(pred))
                     predictions.extend(preds.flatten().numpy())
                     correct += (preds.eq(y)).sum().item()
@@ -383,12 +308,12 @@ for step in range(steps):
                 loss_values = c2_loss_values
                 test_loss_values = c2_test_loss_values
 
-            if epoch == epochs - 1 and step == steps-1:
+            if epoch == epochs-1 and step == steps - 1:
                 plt.plot(loss_values, label='Train Loss')
                 plt.plot(test_loss_values, label='Test Loss')
                 plt.xlabel('Epoch')
                 plt.ylabel('Loss')
-                title_loss = 'Loss over Epochs for FL HN Adaptive LR Model on COMPAS - Client ' + str(c + 1)
+                title_loss = 'Loss over Epochs for FL HN Adaptive NN Model on COMPAS - Client ' + str(c + 1)
                 plt.title(title_loss)
                 plt.legend(loc="upper right")
                 plt.show()
@@ -401,7 +326,8 @@ for step in range(steps):
             f_err = (f_fp + f_fn) / (f_tp + f_fp + f_fn + f_tn)
             m_err = (m_fp + m_fn) / (m_tp + m_fp + m_fn + m_tn)
 
-            AOD = (((f_tp / (f_tp + f_fn)) - (m_tp / (m_tp + m_fn))) + ((f_fp / (f_fp + f_tn)) - (m_fp / (m_fp + m_tn)))) / 2  # average odds difference
+            AOD = (((f_tp / (f_tp + f_fn)) - (m_tp / (m_tp + m_fn))) + (
+                        (f_fp / (f_fp + f_tn)) - (m_fp / (m_fp + m_tn)))) / 2  # average odds difference
             EOD = (f_tp / (f_tp + f_fn)) - (m_tp / (m_tp + m_fn))  # equal opportunity difference
             SPD = (f_tp + f_fp) / (f_tp + f_fp + f_tn + f_fn) - (m_tp + m_fp) / (m_tp + m_fp + m_tn + m_fn)
 
@@ -496,7 +422,8 @@ for step in range(steps):
             print('*******************')
             print('Test Accuracy: {0:1.3f};'.format(c1_test_acc[len(c1_test_acc) - 1]))
             print('Test Error: {0:1.3f};'.format(c1_test_error[len(c1_test_error) - 1]))
-            print('TP: ', c1_tp[len(c1_tp) - 1], 'FP: ', c1_fp[len(c1_fp) - 1], 'TN: ', c1_tn[len(c1_tn) - 1], 'FN: ', c1_fn[len(c1_fn) - 1])
+            print('TP: ', c1_tp[len(c1_tp) - 1], 'FP: ', c1_fp[len(c1_fp) - 1], 'TN: ', c1_tn[len(c1_tn) - 1], 'FN: ',
+                  c1_fn[len(c1_fn) - 1])
             print('EOD: {0:1.4f}'.format(c1_EOD[len(c1_EOD) - 1]))
             print('SPD: {0:1.4f}'.format(c1_SPD[len(c1_SPD) - 1]))
             print('AOD: {0:1.4f}'.format(c1_AOD[len(c1_AOD) - 1]))
@@ -507,7 +434,8 @@ for step in range(steps):
             print('**********************')
             print('Test Accuracy: {0:1.3f}'.format(c1_f_acc[len(c1_f_acc) - 1]))
             print('Test Error: {0:1.3f}'.format(c1_f_err[len(c1_f_err) - 1]))
-            print('TP: ', c1_f_tp[len(c1_f_tp) - 1], 'FP: ', c1_f_fp[len(c1_f_fp) - 1], 'TN: ', c1_f_tn[len(c1_f_tn) - 1], 'FN: ',
+            print('TP: ', c1_f_tp[len(c1_f_tp) - 1], 'FP: ', c1_f_fp[len(c1_f_fp) - 1], 'TN: ',
+                  c1_f_tn[len(c1_f_tn) - 1], 'FN: ',
                   c1_f_fn[len(c1_f_fn) - 1])
             print('F1: {0:1.3f}'.format(c1_f_f1[len(c1_f_f1) - 1]))
             print("")
@@ -522,7 +450,7 @@ for step in range(steps):
             print('F1: {0:1.3f}'.format(c1_m_f1[len(c1_m_f1) - 1]))
 
             for col, encoder in encoders.items():
-                    c1_all_results.loc[:,col] = encoder.inverse_transform(c1_all_results[col])
+                c1_all_results.loc[:, col] = encoder.inverse_transform(c1_all_results[col])
 
             torch.cuda.synchronize()
             end_epoch = time.time()
@@ -566,7 +494,6 @@ for step in range(steps):
                   c2_m_tn[len(c2_m_tn) - 1], 'FN: ',
                   c2_m_fn[len(c2_m_fn) - 1])
             print('F1: {0:1.3f}'.format(c2_m_f1[len(c2_m_f1) - 1]))
-
             for col, encoder in encoders.items():
                 c2_all_results.loc[:, col] = encoder.inverse_transform(c2_all_results[col])
 
@@ -592,7 +519,6 @@ for step in range(steps):
 
         # torch.nn.utils.clip_grad_norm_(hnet.parameters(), 50)
         optimizer.step()
-
 
 print("Time Client 1: ", sum(c1_times), "Time Client 2: ", sum(c2_times))
 

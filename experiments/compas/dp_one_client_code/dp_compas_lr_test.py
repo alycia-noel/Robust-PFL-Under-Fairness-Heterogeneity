@@ -122,22 +122,22 @@ data_test = TabularData(d_test[features].values, d_test[decision].values, d_test
 
 learning_rate = [.1, .05, .01, .005, .003, .001, .0005, .0003, .0001]
 batch_size = [64, 128]
-alpha = [5, 10, 15, 20, 25, 30, 25, 40, 50, 60, 70, 80, 90]
+alphas = [5, 10, 15, 20, 25, 30, 50, 70, 90]
 epochs = [25, 50, 100, 150, 200]
 
-#learning_rate = [.001]
-#batch_size = [128]
-#alpha = [10]
-#epochs = [5, 10, 15]
+no_cuda=False
+gpus='4'
+device = torch.cuda.set_device(4)
 
 for i, lr in enumerate(learning_rate):
     for j, bs in enumerate(batch_size):
-        for k, alpha in enumerate(alpha):
+        for k, alpha in enumerate(alphas):
             for m, eps in enumerate(epochs):
                 mid_results = []
                 for iter in range(5):
                     model = LR(input_size=9)
                     model = model.double()
+                    model = model.to(device)
 
                     # for param in model.parameters():
                     #     nn.init.normal_(param, 0, 1e-7)
@@ -174,8 +174,9 @@ for i, lr in enumerate(learning_rate):
                         total = 0.0
                         for i, (x, y, s) in enumerate(train_loader):
                             optimizer.zero_grad()
-                            y_ = model(x, test=True)
-                            err = loss(y_.flatten(), y) + dp_loss(x.float(), y_.float(), s.float())
+                            y_ = model(x.to(device), test=True)
+                            err = loss(y_.flatten(), y.to(device)) + dp_loss(x.float(), y_.float(), s.float())
+                            err = err.mean()
                             running_loss += err.item() * x.size(0)
                             err.backward()
                             optimizer.step()
@@ -205,13 +206,13 @@ for i, lr in enumerate(learning_rate):
                         correct = 0.0
                         with torch.no_grad():
                             for i, (x, y, s) in enumerate(test_loader):
-                                pred = model(x, test=True)
-                                test_err = loss(pred.flatten(), y)
+                                pred = model(x.to(device), test=True)
+                                test_err = loss(pred.flatten(), y.to(device))
                                 test_err = test_err.mean()
                                 running_loss_test += test_err.item() * x.size(0)
 
-                                preds = pred.round().reshape(1, len(pred))
-                                predictions.extend(preds.flatten().numpy())
+                                preds = pred.round().flatten()
+                                predictions.extend(preds.numpy())
                                 correct += (preds.eq(y)).sum().item()
 
                                 predicted_prediction = preds.type(torch.IntTensor).numpy().reshape(-1)
@@ -247,46 +248,49 @@ for i, lr in enumerate(learning_rate):
 
                         test_loss_values.append(running_loss_test / len(test_loader))
 
-                        f1_score_prediction = TP / (TP + (FP + FN) / 2)
-                        f1_female = f_tp / (f_tp + (f_fp + f_fn) / 2)
-                        f1_male = m_tp / (m_tp + (m_fp + m_fn) / 2)
+                        try:
+                            f1_score_prediction = TP / (TP + (FP + FN) / 2)
+                            f1_female = f_tp / (f_tp + (f_fp + f_fn) / 2)
+                            f1_male = m_tp / (m_tp + (m_fp + m_fn) / 2)
 
-                        f1.append(f1_score_prediction)
-                        F_F1.append(f1_female)
-                        M_F1.append(f1_male)
+                            f1.append(f1_score_prediction)
+                            F_F1.append(f1_female)
+                            M_F1.append(f1_male)
 
-                        # if epoch == 49:
-                        #     plt.plot(loss_values, label='Train Loss')
-                        #     plt.plot(test_loss_values, label='Test Loss')
-                        #     plt.xlabel('Epoch')
-                        #     plt.ylabel('Loss')
-                        #     plt.title('Loss over Epochs for LR Model on COMPAS')
-                        #     plt.legend(loc="upper right")
-                        #     plt.show()
+                            # if epoch == 49:
+                            #     plt.plot(loss_values, label='Train Loss')
+                            #     plt.plot(test_loss_values, label='Test Loss')
+                            #     plt.xlabel('Epoch')
+                            #     plt.ylabel('Loss')
+                            #     plt.title('Loss over Epochs for LR Model on COMPAS')
+                            #     plt.legend(loc="upper right")
+                            #     plt.show()
 
-                        accuracy = (TP + TN) / (TP + FP + FN + TN)
-                        f_acc = (f_tp + f_tn) / (f_tp + f_fp + f_fn + f_tn)
-                        m_acc = (m_tp + m_tn) / (m_tp + m_fp + m_fn + m_tn)
+                            accuracy = (TP + TN) / (TP + FP + FN + TN)
+                            f_acc = (f_tp + f_tn) / (f_tp + f_fp + f_fn + f_tn)
+                            m_acc = (m_tp + m_tn) / (m_tp + m_fp + m_fn + m_tn)
 
-                        error = (FP + FN) / (TP + FP + FN + TN)
-                        f_err = (f_fp + f_fn) / (f_tp + f_fp + f_fn + f_tn)
-                        m_err = (m_fp + m_fn) / (m_tp + m_fp + m_fn + m_tn)
+                            error = (FP + FN) / (TP + FP + FN + TN)
+                            f_err = (f_fp + f_fn) / (f_tp + f_fp + f_fn + f_tn)
+                            m_err = (m_fp + m_fn) / (m_tp + m_fp + m_fn + m_tn)
 
-                        if f_fp == 0 and f_tn == 0:
-                            AOD.append((((f_tp / (f_tp + f_fn)) - (m_tp / (m_tp + m_fn))) + (0 - (m_fp / (m_fp + m_tn)))) / 2)
-                        else:
-                            AOD.append((((f_tp / (f_tp + f_fn)) - (m_tp / (m_tp + m_fn))) + ((f_fp / (f_fp + f_tn)) - (m_fp / (m_fp + m_tn)))) / 2)  # average odds difference
-                        EOD.append((f_tp / (f_tp + f_fn)) - (m_tp / (m_tp + m_fn)))  # equal opportunity difference
-                        SPD.append((f_tp + f_fp) / (f_tp + f_fp + f_tn + f_fn) - (m_tp + m_fp) / (m_tp + m_fp + m_tn + m_fn))
+                            if f_fp == 0 and f_tn == 0:
+                                AOD.append((((f_tp / (f_tp + f_fn)) - (m_tp / (m_tp + m_fn))) + (0 - (m_fp / (m_fp + m_tn)))) / 2)
+                            else:
+                                AOD.append((((f_tp / (f_tp + f_fn)) - (m_tp / (m_tp + m_fn))) + ((f_fp / (f_fp + f_tn)) - (m_fp / (m_fp + m_tn)))) / 2)  # average odds difference
+                            EOD.append((f_tp / (f_tp + f_fn)) - (m_tp / (m_tp + m_fn)))  # equal opportunity difference
+                            SPD.append((f_tp + f_fp) / (f_tp + f_fp + f_tn + f_fn) - (m_tp + m_fp) / (m_tp + m_fp + m_tn + m_fn))
 
-                        res = (
-                            pd  .DataFrame(columns = features, index = d_test.index)
-                                .add_suffix('_partial')
-                                .join(d_test)
-                                .assign(prediction=predictions)
-                                .assign(round=epoch)
-                            )
+                            res = (
+                                pd  .DataFrame(columns = features, index = d_test.index)
+                                    .add_suffix('_partial')
+                                    .join(d_test)
+                                    .assign(prediction=predictions)
+                                    .assign(round=epoch)
+                                )
 
+                        except ZeroDivisionError:
+                            continue
 
                         results.append(res)
                         test_acc.append(accuracy)
