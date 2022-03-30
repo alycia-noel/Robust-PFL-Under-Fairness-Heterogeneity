@@ -36,21 +36,25 @@ for i in range(10):
         lr = 0.01
         wd = 0
         alpha = 30
+        eps = 100
     elif m == "neural-net":
         model = NN(input_size=9)
         lr = .003
         wd = 0.0000001
         alpha = 15
+        eps = 50
     elif m == "log-reg-c":
         model = LR_context(input_size=9, vector_size=9)
-        lr = .001
+        lr = 5e-4#.001
         wd = 0
-        alpha = 10
+        alpha = 50#10
+        eps = 100 #50
     elif m == "neural-net-c":
         model = NN_context(input_size=9, vector_size=9)
         lr = .002
         wd = 0.0000001
         alpha = 15
+        eps = 50
 
     model = model.double()
     model = model.to(device)
@@ -80,7 +84,7 @@ for i in range(10):
     # Train model
 
     model.train() #warm-up
-    epochs = 50
+    epochs = eps
     start_epoch = time.time()
     for epoch in range(epochs): #original 250, best:700
         running_loss = 0.0

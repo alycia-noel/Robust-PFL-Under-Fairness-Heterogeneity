@@ -185,7 +185,7 @@ class LR_HyperNet(nn.Module):
 
         self.mlp = nn.Sequential(*layers)
 
-        self.fc1_weights = nn.Linear(hidden_dim, (self.vector_size)) #[input size, 1]
+        self.fc1_weights = nn.Linear(hidden_dim, 2*(self.vector_size)) #[input size, 1]
         self.fc1_bias = nn.Linear(hidden_dim, 1)
 
 
