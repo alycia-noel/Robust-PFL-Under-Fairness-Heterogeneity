@@ -11,7 +11,7 @@ import numpy as np
 
 warnings.filterwarnings("ignore")
 
-m = "neural-net-c"
+m = "log-reg"
 
 no_cuda=False
 gpus='3'
@@ -33,9 +33,9 @@ for i in range(10):
     print('Round: ', i)
     if m == "log-reg":
         model = LR(input_size=9)
-        lr = 0
+        lr = 0.01
         wd = 0
-        alpha = 0
+        alpha = 30
     elif m == "neural-net":
         model = NN(input_size=9)
         lr = .003
