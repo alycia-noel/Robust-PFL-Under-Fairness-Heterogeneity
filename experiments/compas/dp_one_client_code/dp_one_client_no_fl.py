@@ -8,10 +8,10 @@ from fairtorch import DemographicParityLoss
 from utils import seed_everything, plot_roc_curves, get_data, confusion_matrix, metrics
 from models import LR, NN, LR_context, NN_context
 import numpy as np
-
+import matplotlib.pyplot as plt
 warnings.filterwarnings("ignore")
 
-m = "log-reg"
+m = "log-reg-c"
 
 no_cuda=False
 gpus='3'
@@ -30,31 +30,32 @@ all_EOD, all_SPD, all_AOD = [], [], []
 all_times, all_roc = [], []
 
 for i in range(10):
+    seed_everything(0)
     print('Round: ', i)
     if m == "log-reg":
         model = LR(input_size=9)
-        lr = 0.01
+        lr = .0002
         wd = 0
-        alpha = 30
-        eps = 100
+        alpha = 1
+        eps = 150
     elif m == "neural-net":
         model = NN(input_size=9)
-        lr = .003
-        wd = 0.0000001
-        alpha = 15
-        eps = 50
+        lr = .001
+        wd = .0000001
+        alpha = 1
+        eps = 100
     elif m == "log-reg-c":
         model = LR_context(input_size=9, vector_size=9)
-        lr = 5e-4#.001
+        lr = .0009 #5e-4
         wd = 0
-        alpha = 50#10
-        eps = 100 #50
+        alpha = 1
+        eps = 100
     elif m == "neural-net-c":
         model = NN_context(input_size=9, vector_size=9)
-        lr = .002
-        wd = 0.0000001
-        alpha = 15
-        eps = 50
+        lr = .0005
+        wd = 0.0000005
+        alpha = 1
+        eps = 100
 
     model = model.double()
     model = model.to(device)
@@ -92,8 +93,8 @@ for i in range(10):
 
         for i, (x, y,s ) in enumerate(train_loader):
             optimizer.zero_grad()
-            y_ = model(x.to(device))
-            err = loss(y_.flatten(), y.to(device)) + dp_loss(x.float(), y_.float(), s.float())
+            y_, y_raw = model(x.to(device))
+            err = loss(y_.flatten(), y.to(device)) + dp_loss(x.float(), y_raw.float(), s.float())
             err = err.mean()
             running_loss += err.item() * x.size(0)
             err.backward()
@@ -117,7 +118,7 @@ for i in range(10):
 
         with torch.no_grad():
             for i, (x, y, s) in enumerate(test_loader):
-                pred = model(x.to(device))
+                pred, _ = model(x.to(device))
                 test_err = loss(pred.flatten(), y.to(device))
                 test_err = test_err.mean()
                 running_loss_test += test_err.item() * x.size(0)
@@ -158,6 +159,16 @@ for i in range(10):
         test_error.append(error)
         F_ERR.append(f_err)
         M_ERR.append(m_err)
+
+        if epoch == epochs - 1:
+            plt.plot(loss_values, label='Train Loss')
+            plt.plot(test_loss_values, label='Test Loss')
+            plt.xlabel('Epoch')
+            plt.ylabel('Loss')
+            title_loss = 'Loss over Epochs'
+            plt.title(title_loss)
+            plt.legend(loc="upper right")
+            plt.show()
 
         tn.append(TN)
         tp.append(TP)

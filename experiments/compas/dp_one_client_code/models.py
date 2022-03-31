@@ -9,10 +9,10 @@ class LR(nn.Module):
         self.fc1 = nn.Linear(input_size, 1)
 
     def forward(self, x):
-        y = self.fc1(x)
-        y = torch.sigmoid(y)
+        y1 = self.fc1(x)
+        y2 = torch.sigmoid(y1)
 
-        return y
+        return y2, y1
 
 class NN(nn.Module):
     def __init__(self, input_size, dropout_rate = .45):
@@ -40,7 +40,7 @@ class NN(nn.Module):
         x9 = self.fc5(x8)
         out = torch.sigmoid(x9)
 
-        return out
+        return out, x9
 
 class LR_context(nn.Module):
     def __init__(self, input_size, vector_size):
@@ -75,7 +75,7 @@ class LR_context(nn.Module):
         x1 = self.fc1(prediction_vector)
         y = torch.sigmoid(x1)
 
-        return y
+        return y, x1
 
 class NN_context(nn.Module):
     def __init__(self, input_size,vector_size, hidden_sizes=[10,10,10]):
@@ -125,7 +125,7 @@ class NN_context(nn.Module):
         x9 = self.fc5(x8)
         out = torch.sigmoid(x9)
 
-        return out
+        return out, x9
 
 class LR_combo(nn.Module):
     def __init__(self, input_size, vector_size):
@@ -162,7 +162,7 @@ class LR_combo(nn.Module):
 
         x1 = self.fc1(prediction_vector)
         y = torch.sigmoid(x1)
-        return y
+        return y, x1
 
 class LR_HyperNet(nn.Module):
     def __init__(self, vector_size, hidden_dim):
@@ -255,7 +255,7 @@ class NN_combo(nn.Module):
         x9 = self.fc5(x8)
         out = torch.sigmoid(x9)
 
-        return out
+        return out, x9
 
 class NN_HyperNet(nn.Module):
     def __init__(self, vector_size, hidden_dim):

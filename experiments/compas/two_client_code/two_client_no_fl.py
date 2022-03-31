@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from utils import seed_everything, plot_roc_curves, get_data, confusion_matrix, metrics
 from models import LR, NN, LR_context, NN_context
