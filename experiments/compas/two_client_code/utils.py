@@ -31,7 +31,7 @@ class TabularData(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
 
-def plot_roc_curves(results, pred_col, resp_col, c, size=(7, 5), fname=None):
+def plot_roc_curves(results, pred_col, resp_col, size=(7, 5), fname=None):
     fpr, tpr, _ = roc_curve(results[resp_col], results[pred_col])
     roc_auc = auc(fpr, tpr)
     return roc_auc

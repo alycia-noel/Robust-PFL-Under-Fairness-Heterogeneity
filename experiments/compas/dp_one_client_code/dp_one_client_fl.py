@@ -25,7 +25,7 @@ seed_everything(0)
 data_train, data_test, features, d_train, d_test, encoders = get_data()
 inter_results = []
 
-learning_rate = [.1, .05, .01, .005, .003, .001, .0005, .0003, .0001, .00005, .00003, .00001]
+learning_rate = [.005, .0005, .0003, .0001, .00005, .00003, .00001]
 alphas = [10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100]
 
 all_acc, all_f_acc, all_m_acc = [], [], []
@@ -35,12 +35,29 @@ all_F_TP, all_F_FP, all_F_TN, all_F_FN, all_F_F1 = [], [], [], [], []
 all_M_TP, all_M_FP, all_M_TN, all_M_FN, all_M_F1 = [], [], [], [], []
 all_EOD, all_SPD, all_AOD = [], [], []
 all_times, all_roc = [], []
-
+print("changed")
 for i, lr in enumerate(learning_rate):
     for j, alph in enumerate(alphas):
         for i in range(1):
             #print('Round: ', i)
-
+            if lr == .005 and alph == 10:
+                continue
+            elif lr == .005 and alph == 15:
+                continue
+            elif lr == .005 and alph == 20:
+                continue
+            elif lr ==.005 and alph == 50:
+                continue
+            elif lr ==.005 and alph == 60:
+                continue
+            elif lr == .005 and alph == 70:
+                continue
+            elif lr ==.005 and alph == 80:
+                continue
+            elif lr == .005 and alph == 90:
+                continue
+            elif lr == .005 and alph == 100:
+                continue
             if m == "dp-log-reg-fl":
                 model = LR_combo(input_size=9, vector_size=9)
                 hnet = LR_HyperNet(vector_size=9, hidden_dim=9)
@@ -126,7 +143,10 @@ for i, lr in enumerate(learning_rate):
 
                         y_ = model(x.to(device), context_only=False)
                         demo_parity = dp_loss(x.float(), y_.float(), s.float())
-                        err = loss(y_, y.unsqueeze(1).to(device)) + demo_parity
+                        try:
+                            err = loss(y_, y.unsqueeze(1).to(device)) + demo_parity
+                        except RuntimeError:
+                            continue
                         running_dp_loss += demo_parity
                         running_loss += err.item() * x.size(0)
                         err.backward()
@@ -154,7 +174,10 @@ for i, lr in enumerate(learning_rate):
                     with torch.no_grad():
                         for i, (x, y, s) in enumerate(test_loader):
                             pred = model(x.to(device), context_only=False)
-                            test_err = loss(pred.flatten(), y.to(device))
+                            try:
+                                test_err = loss(pred.flatten(), y.to(device))
+                            except RuntimeError:
+                                continue
                             test_err = test_err.mean()
                             running_loss_test += test_err.item() * x.size(0)
                             preds = pred.detach().cpu().round().reshape(1, len(pred))

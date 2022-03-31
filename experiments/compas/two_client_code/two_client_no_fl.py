@@ -11,11 +11,11 @@ from models import LR, NN, LR_context, NN_context
 
 warnings.filterwarnings("ignore")
 
-m = "neural-net-c"
+m = "neural-net-c-two"
 
 no_cuda=False
-gpus='3'
-device = torch.cuda.set_device(3)
+gpus='4'
+device = torch.cuda.set_device(4)
 
 seed_everything(0)
 
@@ -39,7 +39,7 @@ all_times_2, all_roc_2 = [], []
 
 clients = 2
 
-for i in range(50):
+for i in range(10):
     print('Round: ', i)
 
     if m == "log-reg-two":
@@ -58,7 +58,7 @@ for i in range(50):
     model = model.double()
     model = model.to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr = l, weight_decay = 0.)
+    optimizer = torch.optim.Adam(model.parameters(), lr = l)
     loss = nn.BCELoss(reduction='mean')
 
     for c in range(clients):
@@ -153,15 +153,15 @@ for i in range(50):
             SPD.append(spd)
             EOD.append(eod)
 
-            if epoch == 99:
-                plt.plot(loss_values, label='Train Loss')
-                plt.plot(test_loss_values, label='Test Loss')
-                plt.xlabel('Epoch')
-                plt.ylabel('Loss')
-                title_loss = 'Loss over Epochs for LR Model on COMPAS - Client ' + str(c + 1)
-                plt.title(title_loss)
-                plt.legend(loc="upper right")
-                plt.show()
+            # if epoch == 99:
+            #     plt.plot(loss_values, label='Train Loss')
+            #     plt.plot(test_loss_values, label='Test Loss')
+            #     plt.xlabel('Epoch')
+            #     plt.ylabel('Loss')
+            #     title_loss = 'Loss over Epochs for LR Model on COMPAS - Client ' + str(c + 1)
+            #     plt.title(title_loss)
+            #     plt.legend(loc="upper right")
+            #     plt.show()
 
             if c == 0:
                 res = (
@@ -273,9 +273,9 @@ for i in range(50):
             results.loc[:, col] = encoder.inverse_transform(results[col])
 
         if c == 0:
-            all_roc_1.append(plot_roc_curves('prediction', 'two_year_recid', c, size=(7, 5), fname='./results/roc.png'))
+            all_roc_1.append(plot_roc_curves(results, 'prediction', 'two_year_recid', size=(7, 5), fname='./results/roc.png'))
         elif c == 1:
-            all_roc_1.append(plot_roc_curves('prediction', 'two_year_recid', c, size=(7, 5), fname='./results/roc.png'))
+            all_roc_2.append(plot_roc_curves(results, 'prediction', 'two_year_recid', size=(7, 5), fname='./results/roc.png'))
 
 print('Client One')
 print('*******************')
