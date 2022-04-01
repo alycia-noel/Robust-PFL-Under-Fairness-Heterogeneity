@@ -10,7 +10,7 @@ import numpy as np
 
 warnings.filterwarnings("ignore")
 
-m = "log-reg"
+m = "neural-net"
 
 no_cuda=False
 gpus='3'
@@ -18,7 +18,7 @@ device = torch.cuda.set_device(3)
 
 seed_everything(0)
 
-data_train, data_test, features, d_train, d_test, encoders = get_data()
+
 
 all_acc, all_f_acc, all_m_acc = [], [], []
 all_test_error, all_F_ERR, all_M_ERR = [], [], []
@@ -31,6 +31,7 @@ all_times, all_roc = [], []
 for i in range(10):
     print('Round: ', i)
     seed_everything(0)
+    data_train, data_test, features, d_train, d_test, encoders = get_data()
     if m == "log-reg":
         model = LR(input_size=10)
         l = 2.e-4
