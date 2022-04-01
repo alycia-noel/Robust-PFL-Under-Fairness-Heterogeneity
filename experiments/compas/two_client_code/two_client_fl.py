@@ -41,7 +41,7 @@ hyperparam = []
 clients = 2
 c1_lr = [.1, .3, .5, .05, .03, .01, .001, .003, .005, .008, .0001, .0003, .0005, .00001, .00003, .00005]
 c2_lr = [.1, .3, .5, .05, .03, .01, .001, .003, .005, .008, .0001, .0003, .0005, .00001, .00003, .00005]
-o_lr = [.1, .3, .5, .05, .03, .01, .001, .003, .005, .008, .0001, .0003, .0005, .00001, .00003, .00005]
+o_lr = [.001, .003, .005, .008, .0001, .0003, .0005, .00001, .00003, .00005]
 for z, o in enumerate(o_lr):
     for i, c1 in enumerate(c1_lr):
         for j, c2 in enumerate(c2_lr):
@@ -496,6 +496,7 @@ for z, o in enumerate(o_lr):
             add_to_dict = {'o_l': o, 'c1_l': c1, 'c2_l': c2, 'c1 acc': np.mean(all_acc_1), 'c2 acc':np.mean(all_acc_2) }
             hyperparam.append(add_to_dict)
 
-with open('hyperparam.txt', 'w') as f:
-    for item in hyperparam:
-        f.write("%s\n" % item)
+            with open('hyperparam.txt', 'w') as f:
+                for item in hyperparam:
+                    f.write("%s\n" % item)
+                f.close()
