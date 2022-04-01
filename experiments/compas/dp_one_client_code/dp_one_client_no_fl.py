@@ -11,7 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 warnings.filterwarnings("ignore")
 
-m = "log-reg-c"
+m = "neural-net-c"
 
 no_cuda=False
 gpus='3'
@@ -29,7 +29,7 @@ all_M_TP, all_M_FP, all_M_TN, all_M_FN, all_M_F1 = [], [], [], [], []
 all_EOD, all_SPD, all_AOD = [], [], []
 all_times, all_roc = [], []
 
-for i in range(10):
+for i in range(1):
     seed_everything(0)
     print('Round: ', i)
     if m == "log-reg":

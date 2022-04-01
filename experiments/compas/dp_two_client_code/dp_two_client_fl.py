@@ -12,7 +12,7 @@ from models import LR_combo, NN_combo, LR_HyperNet, NN_HyperNet
 
 warnings.filterwarnings("ignore")
 
-m = "log-reg-two-fl"
+m = "neural-net-two-fl"
 
 no_cuda=False
 gpus='4'
@@ -42,7 +42,7 @@ clients = 2
 
 for i in range(10):
     print('Round: ', i)
-    
+    seed_everything(0)
     if m == "log-reg-two-fl":
         c1_model = LR_combo(input_size=10, vector_size=10)
         c2_model = LR_combo(input_size=10, vector_size=10)
@@ -52,9 +52,15 @@ for i in range(10):
         o_l = 5e-5
         step = 5
         ep = 50
-    elif m == "neural-net-two":
-        model = NN_combo(input_size=10)
-        l = .0001
+    elif m == "neural-net-two-fl":
+        c1_model = NN_combo(input_size=10, vector_size=10)
+        c2_model = NN_combo(input_size=10, vector_size=10)
+        hnet = NN_HyperNet(vector_size=10, hidden_dim=10)
+        c1_l = 7e-3#.0003
+        c2_l = .001
+        o_l = 5e-3#1e-2
+        step = 5#6
+        ep = 50#25
 
     c1_model = c1_model.double()
     c2_model = c2_model.double()

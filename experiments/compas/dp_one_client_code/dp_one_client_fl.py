@@ -12,7 +12,7 @@ from utils import seed_everything, plot_roc_curves, get_data, confusion_matrix, 
 from models import LR_combo, LR_HyperNet, NN_combo, NN_HyperNet
 warnings.filterwarnings("ignore")
 
-m = "dp-log-reg-fl"
+m = "dp-neural-net-fl"
 
 no_cuda=False
 gpus='3'
@@ -36,27 +36,27 @@ all_EOD, all_SPD, all_AOD = [], [], []
 all_times, all_roc = [], []
 
 
-for i in range(10):
+for i in range(1):
     print('Round: ', i)
-
+    seed_everything(10)
     if m == "dp-log-reg-fl":
         model = LR_combo(input_size=9, vector_size=9)
         hnet = LR_HyperNet(vector_size=9, hidden_dim=9)
-        l_o = 1e-5
+        l_o = 3e-2
         l_i = 5e-4
-        step = 5
-        ep = 25
-        alpha = 1
+        step = 10
+        ep = 10
+        alpha = 4
         wd = 0
     elif m == "dp-neural-net-fl":
         model = NN_combo(input_size=9, vector_size=9)
         hnet = NN_HyperNet(vector_size=9, hidden_dim=9)
-        l_o = 0.003
+        l_o = 3e-3
         l_i = 5e-4#1e-3
         step = 5
         ep = 50
-        alpha = 1
-        wd = 0.0000001
+        alpha = 4
+        wd = 0.0000005
 
     model = model.double()
     hnet = hnet.double()
@@ -124,10 +124,7 @@ for i in range(10):
 
                 y_, y_raw = model(x.to(device), context_only=False)
                 demo_parity = dp_loss(x.float(), y_raw.float(), s.float())
-                try:
-                    err = loss(y_, y.unsqueeze(1).to(device)) + demo_parity
-                except RuntimeError:
-                    continue
+                err = loss(y_, y.unsqueeze(1).to(device)) + demo_parity
                 running_dp_loss += demo_parity
                 running_loss += err.item() * x.size(0)
                 err.backward()
@@ -237,8 +234,8 @@ for i in range(10):
         final_state = model.state_dict()
 
         # calculating delta theta
-        delta_theta = OrderedDict({k: inner_state[k] - final_state[k] + average_dp.cpu()  for k in weights.keys()})
-        #delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
+        #delta_theta = OrderedDict({k: inner_state[k] - final_state[k] + average_dp.cpu()  for k in weights.keys()})
+        delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
 
         # print("With dp:" , delta_theta, "\n")
         # print("WIthout dp:", delta_theta_no_add, "\n")
@@ -294,7 +291,7 @@ for i in range(10):
 
     all_roc.append(
         plot_roc_curves(final_final_results, 'prediction', 'two_year_recid', size=(7, 5), fname='./results/roc.png'))
-print(all_acc)
+#print(all_acc)
 print('*******************')
 print('*       all       *')
 print('*******************')

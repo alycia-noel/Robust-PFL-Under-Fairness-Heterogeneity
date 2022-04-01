@@ -32,6 +32,7 @@ all_times, all_roc = [], []
 
 for i in range(10):
     print('Round: ', i)
+    seed_everything(0)
     if m == "log-reg-fl":
         model = LR_combo(input_size=10, vector_size=10)
         hnet = LR_HyperNet(vector_size=10, hidden_dim=10)

@@ -30,7 +30,7 @@ all_times, all_roc = [], []
 
 for i in range(10):
     print('Round: ', i)
-
+    seed_everything(0)
     if m == "log-reg":
         model = LR(input_size=10)
         l = 2.e-4
