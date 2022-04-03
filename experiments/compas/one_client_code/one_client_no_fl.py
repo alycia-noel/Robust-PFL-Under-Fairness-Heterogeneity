@@ -10,7 +10,7 @@ import numpy as np
 
 warnings.filterwarnings("ignore")
 
-m = "neural-net"
+m = "neural-net-c"
 
 no_cuda=False
 gpus='3'

@@ -10,9 +10,9 @@ import torch
 import torch.utils.data
 from tqdm import trange # for the progress bar
 
-from experiments import HyperCOMPASLR, TargetAndContextCOMPASLR # loads the model architecture
-from experiments import BaseNodes # loads the client generator
-from experiments.dp_one_client_code.utils import get_device, set_logger, set_seed  # loads extra tools
+from models import HyperCOMPASLR, TargetAndContextCOMPASLR # loads the model architecture
+from node import BaseNodes # loads the client generator
+#from experiments.dp_one_client_code.utils import get_device, set_logger, set_seed  # loads extra tools
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -39,19 +39,11 @@ def evaluate(nodes: BaseNodes, num_nodes, hnet, combonet, criteria, device, spli
         running_loss, running_correct, running_samples = 0., 0., 0.
         if split == 'test':
             curr_data = nodes.test_loaders[node_id]
-        elif split == 'val':
-            curr_data = nodes.val_loaders[node_id]
         else:
             curr_data = nodes.train_loaders[node_id]
 
         for batch_count, batch in enumerate(curr_data):
             img, label = tuple(t.float().to(device) for t in batch)
-            context_vector, avg_context_vector, prediction_vector = combonet(img, contextonly=True)
-            weights_1 = hnet(avg_context_vector)
-            net_dict = combonet.state_dict()
-            hnet_dict = {k: v for k, v in weights_1.items() if k in net_dict}
-            net_dict.update(hnet_dict)
-            combonet.load_state_dict(net_dict)
             pred = combonet(img, contextonly=False)
             running_loss = running_loss +  criteria(pred, label.unsqueeze(1)).mean().item()
             running_correct = running_correct + pred.argmax(1).eq(label).sum().item()
@@ -70,24 +62,24 @@ def train(data_name: str, num_nodes: int, steps: int, inner_steps: int, device, 
     # init nodes, hnet, local net #
     ###############################
     # generate the clients
-    nodes = BaseNodes(data_name, data_path=None, n_nodes = 2, classes_per_node=1, batch_size=32)
+    nodes = BaseNodes(data_name, data_path=None, n_nodes = 2, classes_per_node=2, batch_size=128)
 
-    embed_dim=11
+    embed_dim=10
 
     # create the hypernet, local, and context network
-    hnet = HyperCOMPASLR(embedding_dim= 11, hidden_dim=64)
-    combonet = TargetAndContextCOMPASLR(input_size = 11, vector_size = embed_dim)
+    hnet = HyperCOMPASLR(embedding_dim= 10, hidden_dim=100)
+    combonet = TargetAndContextCOMPASLR(input_size = 10, vector_size = embed_dim)
 
     # send both of the networks to the GPU
     hnet = hnet.to(device)
     combonet = combonet.to(device)
 
     # setting up optimizers
-    optimizer = torch.optim.Adam(hnet.parameters(), lr=1e-2, weight_decay=1e-3)
+    optimizer = torch.optim.Adam(hnet.parameters(), lr=.01)
 
     # Loss function
     criteria = nn.BCELoss(reduction='mean')  # Binary Cross Entropy loss
-
+    #criteria = torch.nn.CrossEntropyLoss()
     last_eval = -1
     best_step = -1
     best_acc = -1
@@ -102,32 +94,35 @@ def train(data_name: str, num_nodes: int, steps: int, inner_steps: int, device, 
         # select client at random
         node_id = random.choice(range(num_nodes))
 
-        batch = next(iter(nodes.val_loaders[node_id]))
+        batch = next(iter(nodes.train_loaders[node_id]))
 
-        features_val, labels_val = tuple(t.float().to(device) for t in batch)
+        features, labels = tuple(t.float().to(device) for t in batch)
 
-        context_vectors, avg_context_vector, prediction_vector = combonet(features_val, contextonly=True)
+        #context_vectors, avg_context_vector, prediction_vector = combonet(features_val, contextonly=True)
+        node_id = random.choice(range(num_nodes))
 
         # produce & load local network weights
-        weights = hnet(avg_context_vector)
-        net_dict = combonet.state_dict()
-        hnet_dict = {k: v for k, v in weights.items() if k in net_dict}
-        net_dict.update(hnet_dict)
-        combonet.load_state_dict(net_dict)
+        weights =  hnet(torch.tensor([node_id], dtype=torch.long).to(device))
+        #net_dict = combonet.state_dict()
+        combonet.load_state_dict(weights)
+
+        # hnet_dict = {k: v for k, v in weights.items() if k in net_dict}
+        # net_dict.update(hnet_dict)
+        # combonet.load_state_dict(net_dict)
 
         # init inner optimizer
-        inner_optim = torch.optim.SGD(combonet.parameters(), lr=3e-3, momentum= .9, weight_decay=5e-5)
-
+        #inner_optim = torch.optim.SGD(combonet.parameters(), lr=.01, momentum= .9, weight_decay=5e-5)
+        inner_optim = torch.optim.Adam(combonet.parameters(), lr = .0001)
         # storing theta_i for later calculating delta theta
         inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
 
         # NOTE: evaluation on sent model
         with torch.no_grad():
             combonet.eval()
-            pred = combonet(features_val, contextonly=False)
+            pred = combonet(features, contextonly=False)
 
-            prvs_loss = criteria(pred, labels_val.unsqueeze(1))
-            prvs_acc = pred.argmax(1).eq(labels_val).sum().item() / len(labels_val)
+            prvs_loss = criteria(pred, labels.unsqueeze(1))
+            prvs_acc = pred.argmax(1).eq(labels).sum().item() / len(labels)
 
 
         # inner updates -> obtaining theta_tilda
@@ -145,7 +140,7 @@ def train(data_name: str, num_nodes: int, steps: int, inner_steps: int, device, 
             loss = criteria(pred, label_train.unsqueeze(1))
             loss.backward()
 
-            #torch.nn.utils.clip_grad_norm_(combonet.parameters(), 50)
+            torch.nn.utils.clip_grad_norm_(combonet.parameters(), 50)
 
             inner_optim.step()
 
@@ -169,7 +164,7 @@ def train(data_name: str, num_nodes: int, steps: int, inner_steps: int, device, 
         for p, g in zip(hnet.parameters(), hnet_grads):
             p.grad = g
 
-        #torch.nn.utils.clip_grad_norm_(hnet.parameters(), 50)
+        torch.nn.utils.clip_grad_norm_(hnet.parameters(), 50)
         optimizer.step()
 
         step_iter.set_description(
@@ -177,60 +172,9 @@ def train(data_name: str, num_nodes: int, steps: int, inner_steps: int, device, 
         )
 
         if step % eval_every == 0:
-            last_eval = step
             step_results, avg_loss, avg_acc, all_acc = eval_model(nodes, num_nodes, hnet, combonet, criteria, device, split="test")
-            logging.info(f"\nStep: {step+1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}")
+            print(f"\nStep: {step+1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}")
 
-            results['test_avg_loss'].append(avg_loss)
-            results['test_avg_acc'].append(avg_acc)
-
-            _, val_avg_loss, val_avg_acc, _ = eval_model(nodes, num_nodes, hnet, combonet, criteria, device, split="val")
-            if best_acc < val_avg_acc:
-                best_acc = val_avg_acc
-                best_step = step
-                test_best_based_on_step = avg_acc
-                test_best_min_based_on_step = np.min(all_acc)
-                test_best_max_based_on_step = np.max(all_acc)
-                test_best_std_based_on_step = np.std(all_acc)
-
-            results['val_avg_loss'].append(val_avg_loss)
-            results['val_avg_acc'].append(val_avg_acc)
-            results['best_step'].append(best_step)
-            results['best_val_acc'].append(best_acc)
-            results['best_test_acc_based_on_val_beststep'].append(test_best_based_on_step)
-            results['test_best_min_based_on_step'].append(test_best_min_based_on_step)
-            results['test_best_max_based_on_step'].append(test_best_max_based_on_step)
-            results['test_best_std_based_on_step'].append(test_best_std_based_on_step)
-
-    if step != last_eval:
-        _, val_avg_loss, val_avg_acc, _ = eval_model(nodes, num_nodes, hnet, combonet, criteria, device, split="val")
-        step_results, avg_loss, avg_acc, all_acc = eval_model(nodes, num_nodes, hnet, combonet, criteria, device, split="test")
-        logging.info(f"\nStep: {step + 1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}")
-
-        results['test_avg_loss'].append(avg_loss)
-        results['test_avg_acc'].append(avg_acc)
-
-        if best_acc < val_avg_acc:
-            best_acc = val_avg_acc
-            best_step = step
-            test_best_based_on_step = avg_acc
-            test_best_min_based_on_step = np.min(all_acc)
-            test_best_max_based_on_step = np.max(all_acc)
-            test_best_std_based_on_step = np.std(all_acc)
-
-        results['val_avg_loss'].append(val_avg_loss)
-        results['val_avg_acc'].append(val_avg_acc)
-        results['best_step'].append(best_step)
-        results['best_val_acc'].append(best_acc)
-        results['best_test_acc_based_on_val_beststep'].append(test_best_based_on_step)
-        results['test_best_min_based_on_step'].append(test_best_min_based_on_step)
-        results['test_best_max_based_on_step'].append(test_best_max_based_on_step)
-        results['test_best_std_based_on_step'].append(test_best_std_based_on_step)
-
-    save_path = Path(save_path)
-    save_path.mkdir(parents=True, exist_ok=True)
-    with open(str(save_path / f"results_{inner_steps}_inner_steps_seed_{seed}.json"), "w") as file:
-        json.dump(results, file, indent=4)
 
 
 if __name__ == '__main__':
@@ -253,19 +197,19 @@ if __name__ == '__main__':
     #############################
     #       General args        #
     #############################
-    parser.add_argument("--gpu", type=int, default=0, help="gpu device ID")
-    parser.add_argument("--eval-every", type=int, default=30, help="eval every X selected epochs")
+    parser.add_argument("--gpu", type=int, default=4, help="gpu device ID")
+    parser.add_argument("--eval-every", type=int, default=50, help="eval every X selected epochs")
     parser.add_argument("--save-path", type=str, default="/home/ancarey/adaptive-hypernets-results/COMPAS", help="dir path for output file")
     parser.add_argument("--seed", type=int, default=42, help="seed value")
 
     args = parser.parse_args()
     assert args.gpu <= torch.cuda.device_count(), f"--gpu flag should be in range [0,{torch.cuda.device_count() - 1}]"
 
-    set_logger()
-    set_seed(args.seed)
+    #set_logger()
+    #set_seed(args.seed)
 
-    device = get_device(gpus=args.gpu)
-
+    #device = get_device(gpus=args.gpu)
+    device = torch.cuda.set_device(3)
     train(
         data_name=args.data_name,
         num_nodes=args.num_nodes,

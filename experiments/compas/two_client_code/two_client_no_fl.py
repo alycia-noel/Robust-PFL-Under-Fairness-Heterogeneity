@@ -7,10 +7,11 @@ import pandas as pd
 from torch.utils.data import DataLoader
 from utils import seed_everything, plot_roc_curves, get_data, confusion_matrix, metrics
 from models import LR, NN, LR_context, NN_context
+import matplotlib.pyplot as plt
 
 warnings.filterwarnings("ignore")
 
-m = "neural-net-two"
+m = "neural-net-c-two"
 
 no_cuda=False
 gpus='4'
@@ -34,7 +35,7 @@ all_times_2, all_roc_2 = [], []
 
 clients = 2
 
-for i in range(10):
+for i in range(1):
     print('Round: ', i)
 
     seed_everything(0)
@@ -55,15 +56,15 @@ for i in range(10):
     elif m == "log-reg-c-two":
         model = LR_context(input_size=10, vector_size=10)
         l_1 = .0001
-        l_2 = .0001
-        ep_1 = 150
-        ep_2 = 100
+        l_2 = .00011
+        ep_1 = 100
+        ep_2 = 150
     elif m == "neural-net-c-two":
         model = NN_context(input_size=10, vector_size=10)
         l_1 = .0011
-        l_2 = .003
+        l_2 = .005
         ep_1 = 100
-        ep_2 = 100
+        ep_2 = 60
 
     model = model.double()
     model = model.to(device)
@@ -170,15 +171,15 @@ for i in range(10):
             SPD.append(spd)
             EOD.append(eod)
 
-            # if epoch == 99:
-            #     plt.plot(loss_values, label='Train Loss')
-            #     plt.plot(test_loss_values, label='Test Loss')
-            #     plt.xlabel('Epoch')
-            #     plt.ylabel('Loss')
-            #     title_loss = 'Loss over Epochs for LR Model on COMPAS - Client ' + str(c + 1)
-            #     plt.title(title_loss)
-            #     plt.legend(loc="upper right")
-            #     plt.show()
+            if epoch == epochs - 1:
+                plt.plot(loss_values, label='Train Loss')
+                plt.plot(test_loss_values, label='Test Loss')
+                plt.xlabel('Epoch')
+                plt.ylabel('Loss')
+                title_loss = 'Loss over Epochs for LR Model on COMPAS - Client ' + str(c + 1)
+                plt.title(title_loss)
+                plt.legend(loc="upper right")
+                plt.show()
 
             if c == 0:
                 res = (

@@ -1,4 +1,4 @@
-from experiments.extra.dataset import gen_random_loaders
+from experiments.pfedhn.dataset import gen_random_loaders
 
 # creates each client
 class BaseNodes:
@@ -17,7 +17,7 @@ class BaseNodes:
 
     # use gen_random_loaders to get the train, validation, and test dataloaders
     def _init_dataloaders(self):
-        self.train_loaders, self.val_loaders, self.test_loaders = gen_random_loaders(self.data_name, self.data_path, self.n_nodes, self.batch_size, self.classes_per_node)
+        self.train_loaders, self.test_loaders = gen_random_loaders(self.data_name, self.data_path, self.n_nodes, self.batch_size, self.classes_per_node)
 
     # Returns the number of clients
     def __len__(self):

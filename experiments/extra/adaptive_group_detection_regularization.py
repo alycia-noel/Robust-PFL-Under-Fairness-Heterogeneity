@@ -3,8 +3,7 @@ import random
 import numpy as np
 import torch
 import torch.nn as nn
-from matplotlib import pyplot as plt
-from dataset import get_datasets
+from experiments.pfedhn.dataset import get_datasets
 #from data_loader_detection import DatasetPoison -- use the dataset loader from hypernets code
 import argparse
 
