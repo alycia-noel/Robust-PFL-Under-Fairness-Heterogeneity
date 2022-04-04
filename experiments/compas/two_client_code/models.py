@@ -88,14 +88,14 @@ class LR_combo(nn.Module):
         return y
 
 class LR_HyperNet(nn.Module):
-    def __init__(self, vector_size, hidden_dim):
+    def __init__(self, vector_size, hidden_dim, num_hidden):
         super().__init__()
         self.embedding_dim = 10
         self.embeddings = nn.Embedding(num_embeddings=2, embedding_dim=self.embedding_dim)
         self.hidden_dim = hidden_dim
         self.vector_size = vector_size
 
-        n_hidden = 2
+        n_hidden = num_hidden
 
         layers = [
             nn.Linear(self.vector_size + self.embedding_dim, hidden_dim),  # [13, 100]

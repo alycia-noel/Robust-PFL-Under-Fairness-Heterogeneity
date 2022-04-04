@@ -54,7 +54,7 @@ class LR_context(nn.Module):
         # Context Network
         self.context_fc1 = nn.Linear(self.input_size, self.hidden_size)
         self.context_relu1 = nn.LeakyReLU()
-        self.context_fc2 = nn.Linear(self.hidden_size, self.hidden_size)
+        self.context_fc2 = nn.Linear(self.hidden_size, self.vector_size)
         self.context_relu2 = nn.LeakyReLU()
         self.context_fc3 = nn.Linear(self.hidden_size, self.vector_size)
 
@@ -62,9 +62,9 @@ class LR_context(nn.Module):
         # Pass through context network
         hidden1 = self.context_fc1(x)
         relu1 = self.context_relu1(hidden1)
-        hidden2 = self.context_fc2(relu1)
-        relu2 = self.context_relu2(hidden2)
-        context_vector = self.context_fc3(relu2)
+        context_vector = self.context_fc2(relu1)
+        #relu2 = self.context_relu2(hidden2)
+        #context_vector = self.context_fc3(relu2)
 
         ###### adaptive prediction
         avg_context_vector = torch.mean(context_vector, dim=0)
