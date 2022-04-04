@@ -14,8 +14,8 @@ warnings.filterwarnings("ignore")
 m = "neural-net-c-two"
 
 no_cuda=False
-gpus='4'
-device = torch.cuda.set_device(4)
+gpus='5'
+device = torch.cuda.set_device(5)
 
 all_acc_1, all_f_acc_1, all_m_acc_1 = [], [], []
 all_test_error_1, all_F_ERR_1, all_M_ERR_1 = [], [], []
@@ -35,44 +35,43 @@ all_times_2, all_roc_2 = [], []
 
 clients = 2
 
-for i in range(1):
+for i in range(10):
     print('Round: ', i)
 
     seed_everything(0)
     data_train_1, data_test_1, data_train_2, data_test_2, features_1, features_2, decision_1, decision_2, d_test_1, d_test_2, encoders = get_data()
 
-    if m == "log-reg-two":
-        model = LR(input_size=10)
-        l_1 = 7e-3
-        l_2 = 5e-2
-        ep_1 = 150
-        ep_2 = 100
-    elif m == "neural-net-two":
-        model = NN(input_size=10)
-        l_1 = .0015
-        l_2 = 1e-3
-        ep_1 = 100
-        ep_2 = 100
-    elif m == "log-reg-c-two":
-        model = LR_context(input_size=10, vector_size=10)
-        l_1 = .0001
-        l_2 = .00011
-        ep_1 = 100
-        ep_2 = 150
-    elif m == "neural-net-c-two":
-        model = NN_context(input_size=10, vector_size=10)
-        l_1 = .0011
-        l_2 = .005
-        ep_1 = 100
-        ep_2 = 60
-
-    model = model.double()
-    model = model.to(device)
-
-
-    loss = nn.BCELoss(reduction='mean')
-
     for c in range(clients):
+
+        if m == "log-reg-two":
+            model = LR(input_size=10)
+            l_1 = .007#7e-3
+            l_2 = 7e-3
+            ep_1 = 150
+            ep_2 = 100
+        elif m == "neural-net-two":
+            model = NN(input_size=10)
+            l_1 = .0015
+            l_2 = 1e-3
+            ep_1 = 100
+            ep_2 = 100
+        elif m == "log-reg-c-two":
+            model = LR_context(input_size=10, vector_size=10)
+            l_1 = .0001
+            l_2 = .0007
+            ep_1 = 100
+            ep_2 = 150
+        elif m == "neural-net-c-two":
+            model = NN_context(input_size=10, vector_size=10)
+            l_1 = .0011
+            l_2 = .005
+            ep_1 = 100
+            ep_2 = 60
+
+        model = model.double()
+        model = model.to(device)
+
+        loss = nn.BCELoss(reduction='mean')
 
         if c == 0:
             data_train = data_train_1

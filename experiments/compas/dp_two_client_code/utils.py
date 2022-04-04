@@ -114,9 +114,13 @@ def confusion_matrix(s, predicted_prediction, labels_pred, TP, FP, FN, TN, f_tp,
     return TP, FP, FN, TN, f_tp, f_fp, f_tn, f_fn, m_tp, m_fp, m_tn, m_fn
 
 def metrics(TP, FP, FN, f_tp, f_fp, f_fn, m_tp, m_fp, m_fn, TN, f_tn, m_tn):
-    f1_score_prediction = TP / (TP + (FP + FN) / 2)
-    f1_female = f_tp / (f_tp + (f_fp + f_fn) / 2)
-    f1_male = m_tp / (m_tp + (m_fp + m_fn) / 2)
+    #print(TP, FP, TN, FN)
+    try:
+        f1_score_prediction = TP / (TP + (FP + FN) / 2)
+        f1_female = f_tp / (f_tp + (f_fp + f_fn) / 2)
+        f1_male = m_tp / (m_tp + (m_fp + m_fn) / 2)
+    except ZeroDivisionError:
+        f1_score_prediction, f1_female, f1_male = 0, 0, 0
 
     accuracy = (TP + TN) / (TP + FP + FN + TN)
     f_acc = (f_tp + f_tn) / (f_tp + f_fp + f_fn + f_tn)

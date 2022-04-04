@@ -7,7 +7,7 @@ import pandas as pd
 from torch.utils.data import DataLoader
 from utils import seed_everything, plot_roc_curves, get_data, confusion_matrix, metrics
 from models import LR, NN, LR_context, NN_context
-from fairtorch import DemographicParityLoss
+from fairtorch import DemographicParityLoss, EqualiedOddsLoss
 import matplotlib.pyplot as plt
 
 warnings.filterwarnings("ignore")
@@ -15,11 +15,10 @@ warnings.filterwarnings("ignore")
 m = "log-reg-two-dp"
 
 no_cuda=False
-gpus='4'
-device = torch.cuda.set_device(4)
+gpus='5'
+device = torch.cuda.set_device(5)
 
 seed_everything(0)
-
 data_train_1, data_test_1, data_train_2, data_test_2, features_1, features_2, decision_1, decision_2, d_test_1, d_test_2, encoders = get_data()
 
 all_acc_1, all_f_acc_1, all_m_acc_1 = [], [], []
@@ -42,39 +41,46 @@ clients = 2
 
 for i in range(1):
     print('Round: ', i)
-    seed_everything(0)
-    if m == "log-reg-two-dp":
-        model = LR(input_size=9)
-        l_1 = 6e-4
-        l_2 = 1e-6 #2e-6
-        wd = 0
-        alpha_1 = 100
-        alpha_2 = 0#50
-        eps_1 = 150
-        eps_2 = 100
-    elif m == "neural-net-two-dp":
-        model = NN(input_size=9)
-        l = .0001
-        wd = .0000001
-        alpha = 1
-        eps = 100
-    elif m == "log-reg-c-two-dp":
-        model = LR_context(input_size=9, vector_size=9)
-        l = 5.e-4
-        wd = 0
-        alpha = 1
-        eps = 100
-    elif m == "neural-net-c-two-dp":
-        model = NN_context(input_size=9, vector_size=9)
-        l = .0001
-        wd = 0.0000005
-        alpha = 1
-        eps = 100
-
-    model = model.double()
-    model = model.to(device)
 
     for c in range(clients):
+        seed_everything(0)
+        if m == "log-reg-two-dp":
+            model = LR(input_size=9)
+            # l_1 = 8e-4        # Top two are for DP
+            # l_2 = 7e-3
+            l_1 = 8e-4          # Bottom two are for EO
+            l_2 = 7e-5
+            wd = 0
+            #alpha_1 = 70       # Top two are for DP
+            #alpha_2 = 2
+            alpha_1 = 1
+            alpha_2 = 0
+            eps_1 = 100
+            eps_2 = 90
+        elif m == "neural-net-two-dp":
+            model = NN(input_size=9)
+            l_1 = .0001
+            l_2 = .0001
+            wd = .0000001
+            alpha_1 = 50
+            alpha_2 = 1
+            eps_1 = 100
+            eps_2 = 100
+        elif m == "log-reg-c-two-dp":
+            model = LR_context(input_size=9, vector_size=9)
+            l = 5.e-4
+            wd = 0
+            alpha = 1
+            eps = 100
+        elif m == "neural-net-c-two-dp":
+            model = NN_context(input_size=9, vector_size=9)
+            l = .0001
+            wd = 0.0000005
+            alpha = 1
+            eps = 100
+
+        model = model.double()
+        model = model.to(device)
 
         if c == 0:
             data_train = data_train_1
@@ -82,7 +88,7 @@ for i in range(1):
             l = l_1
             alpha = alpha_1
             eps = eps_1
-        else:
+        elif c == 1:
             data_train = data_train_2
             data_test = data_test_2
             l = l_2
@@ -90,11 +96,15 @@ for i in range(1):
             eps = eps_2
 
         optimizer = torch.optim.Adam(model.parameters(), lr=l)
-        loss = nn.BCELoss(reduction='mean')
-        dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=alpha)
+        loss = nn.BCEWithLogitsLoss(reduction='mean')
+        #dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=alpha)
+        eo_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=alpha)
 
-        train_loader = DataLoader(data_train, shuffle = True, batch_size = 128)
-        test_loader = DataLoader(data_test, shuffle = False, batch_size= 128)
+        #train_loader = DataLoader(data_train, shuffle = True, batch_size = 128)
+        #test_loader = DataLoader(data_test, shuffle = True, batch_size= 128) #set shuffle to true only for neural net
+
+        train_loader = DataLoader(data_train, shuffle=True, batch_size=256)
+        test_loader = DataLoader(data_test, shuffle=False, batch_size=256)
 
         results = []
         loss_values = []
@@ -117,16 +127,16 @@ for i in range(1):
         for epoch in range(epochs):
             running_loss = 0.0
             correct = 0.0
-       
+            print(epoch)
             for i, (x, y, s) in enumerate(train_loader):
                 optimizer.zero_grad()
                 y_, y_raw = model(x.to(device))
-                err = loss(y_.flatten(), y.to(device)) + dp_loss(x.float(), y_raw.float(), s.float())
+                #err = loss(y_raw.flatten(), y) + dp_loss(x.float(), y_raw.float(), s.float()).cpu()
+                err = loss(y_raw.flatten(), y) + eo_loss(x.float(), y_raw.float(), s.float(), y.float()).cpu()
                 err = err.mean()
                 running_loss += err.item() * x.size(0)
                 err.backward()
                 optimizer.step()
-
                 preds = y_.round().reshape(1, len(y_))
                 correct += (preds.eq(y)).sum().item()
 
@@ -146,7 +156,8 @@ for i in range(1):
             with torch.no_grad():
                 for i, (x, y, s) in enumerate(test_loader):
                     pred, pred_raw = model(x)
-                    test_err = loss(pred.flatten(), y)
+                    print(model.fc1.weight)
+                    test_err = loss(pred_raw.flatten(), y)
                     test_err = test_err.mean()
                     running_loss_test += test_err.item() * x.size(0)
 
@@ -164,6 +175,7 @@ for i in range(1):
                                                                                                       f_fp, f_tn, f_fn,
                                                                                                       m_tp, m_fp, m_tn,
                                                                                                       m_fn)
+                    #print(epoch, i, TP, FP, FN, TN)
 
             test_loss_values.append(running_loss_test / len(test_loader))
 

@@ -4,14 +4,14 @@ import torch
 import torch.nn as nn
 import pandas as pd
 from torch.utils.data import  DataLoader
-from fairtorch import DemographicParityLoss
+from fairtorch import DemographicParityLoss, EqualiedOddsLoss
 from utils import seed_everything, plot_roc_curves, get_data, confusion_matrix, metrics
 from models import LR, NN, LR_context, NN_context
 import numpy as np
 import matplotlib.pyplot as plt
 warnings.filterwarnings("ignore")
 
-m = "neural-net-c"
+m = "neural-net"
 
 no_cuda=False
 gpus='3'
@@ -34,15 +34,19 @@ for i in range(1):
     print('Round: ', i)
     if m == "log-reg":
         model = LR(input_size=9)
-        lr = .0002
+        lr = .00025        # for dp
+        #lr = .0003 #.001         # for eo
         wd = 0
-        alpha = 1
+        alpha = 70       # for dp
+        #alpha = 5          #for eo
         eps = 150
     elif m == "neural-net":
         model = NN(input_size=9)
-        lr = .001
+        lr = .0005     # for dp
+        #lr = .0005
         wd = .0000001
-        alpha = 1
+        alpha = 70      # for dp
+        #alpha = 15
         eps = 100
     elif m == "log-reg-c":
         model = LR_context(input_size=9, vector_size=9)
@@ -60,12 +64,18 @@ for i in range(1):
     model = model.double()
     model = model.to(device)
 
+    # for dp
     train_loader = DataLoader(data_train, shuffle = True, batch_size = 128)
     test_loader = DataLoader(data_test, shuffle = False, batch_size= 128)
+
+    # for eo
+    #train_loader = DataLoader(data_train, shuffle=True, batch_size=256)
+    #test_loader = DataLoader(data_test, shuffle = False, batch_size=256)
 
     optimizer = torch.optim.Adam(model.parameters(), lr = lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=wd)
     loss = nn.BCEWithLogitsLoss(reduction='mean') #Binary Cross Entropy loss
     dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=alpha)
+    #eo_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=alpha)
 
     loss_values = []
     test_loss_values = []
@@ -94,7 +104,8 @@ for i in range(1):
         for i, (x, y,s ) in enumerate(train_loader):
             optimizer.zero_grad()
             y_, y_raw = model(x.to(device))
-            err = loss(y_.flatten(), y.to(device)) + dp_loss(x.float(), y_raw.float(), s.float())
+            err = loss(y_raw.flatten(), y.to(device)) + dp_loss(x.float(), y_raw.float(), s.float())
+            #err = loss(y_raw.flatten(), y.to(device)) + eo_loss(x.float(), y_raw.float(), s.float(), y.float())
             err = err.mean()
             running_loss += err.item() * x.size(0)
             err.backward()
@@ -118,15 +129,14 @@ for i in range(1):
 
         with torch.no_grad():
             for i, (x, y, s) in enumerate(test_loader):
-                pred, _ = model(x.to(device))
-                test_err = loss(pred.flatten(), y.to(device))
+                pred, pred_raw = model(x.to(device))
+                test_err = loss(pred_raw.flatten(), y.to(device))
                 test_err = test_err.mean()
                 running_loss_test += test_err.item() * x.size(0)
 
                 preds = pred.round().reshape(1, len(pred))
                 predictions.extend(preds.flatten().numpy())
                 correct += (preds.eq(y)).sum().item()
-
                 predicted_prediction = preds.type(torch.IntTensor).numpy().reshape(-1)
                 labels_pred = y.type(torch.IntTensor).numpy().reshape(-1)
 

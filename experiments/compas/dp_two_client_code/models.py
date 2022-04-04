@@ -9,7 +9,6 @@ class LR(nn.Module):
         self.fc1 = nn.Linear(input_size, 1)
 
     def forward(self, x):
-        #x_flat = x.flatten()
         y = self.fc1(x)
         out = torch.sigmoid(y)
 
@@ -20,7 +19,7 @@ class LR_context(nn.Module):
         super(LR_context, self).__init__()
         self.input_size = input_size
         self.vector_size = vector_size
-        self.hidden_size = 10
+        self.hidden_size = 100
 
         # Logistic Regression
         self.fc1 = nn.Linear(self.input_size + self.vector_size, 1)
@@ -54,7 +53,7 @@ class LR_combo(nn.Module):
         super(LR_combo, self).__init__()
         self.input_size = input_size
         self.vector_size = vector_size
-        self.hidden_size = 10
+        self.hidden_size = 100
 
         # Logistic Regression
         self.fc1 = nn.Linear(self.input_size + self.vector_size, 1)
