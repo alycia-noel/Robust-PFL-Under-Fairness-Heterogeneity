@@ -200,10 +200,9 @@ def set_averaged_weights_as_main_model_weights_and_update_main_model(main_model,
         main_model.fc2.weight.data = fc2_mean_weight.data.clone()
         main_model.fc3.weight.data = fc3_mean_weight.data.clone()
 
-        main_model.fc1.bias.data = fc3_mean_bias.data.clone()
+        main_model.fc1.bias.data = fc1_mean_bias.data.clone()
         main_model.fc2.bias.data = fc2_mean_bias.data.clone()
         main_model.fc3.bias.data = fc3_mean_bias.data.clone()
-
     return main_model
 
 
@@ -255,7 +254,6 @@ def start_train_end_node_process(number_of_samples):
         print("Subset", i)
         for epoch in range(numEpoch):
             train_loss, train_accuracy = train(model, train_dl, criterion, optimizer)
-            #valid_loss, valid_accuracy = validation(model, valid_dl, criterion)
             test_loss, test_accuracy = validation(model, test_dl, criterion)
 
             print("epoch: {:3.0f}".format(epoch + 1) + " | train accuracy: {:7.5f}".format(

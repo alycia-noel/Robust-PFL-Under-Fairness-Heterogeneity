@@ -102,7 +102,7 @@ class LR_HyperNet(nn.Module):
             layers.append(
                 nn.Linear(hidden_dim, hidden_dim)
             )
-        layers.append(nn.Linear(hidden_dim, hidden_dim))
+        #layers.append(nn.Linear(hidden_dim, hidden_dim))
 
         self.mlp = nn.Sequential(*layers)
 

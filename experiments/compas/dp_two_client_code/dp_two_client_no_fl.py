@@ -138,7 +138,7 @@ for i in range(1):
                 err.backward()
                 optimizer.step()
                 preds = y_.round().reshape(1, len(y_))
-                correct += (preds.eq(y)).sum().item()
+
 
             accuracy = (100 * correct / len(data_train))
             acc_values.append(accuracy)
