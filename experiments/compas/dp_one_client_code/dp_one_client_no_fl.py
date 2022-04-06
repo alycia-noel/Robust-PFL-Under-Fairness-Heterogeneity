@@ -29,23 +29,23 @@ all_M_TP, all_M_FP, all_M_TN, all_M_FN, all_M_F1 = [], [], [], [], []
 all_EOD, all_SPD, all_AOD = [], [], []
 all_times, all_roc = [], []
 
-for i in range(1):
+for i in range(10):
     seed_everything(0)
     print('Round: ', i)
     if m == "log-reg":
         model = LR(input_size=9)
-        lr = .00025        # for dp
+        lr = .0005                # for dp
         #lr = .0003 #.001         # for eo
         wd = 0
-        alpha = 70       # for dp
+        alpha = 9.5         # for dp
         #alpha = 5          #for eo
         eps = 150
     elif m == "neural-net":
         model = NN(input_size=9)
-        lr = .0005     # for dp
+        lr = .0008   # for dp
         #lr = .0005
         wd = .0000001
-        alpha = 70      # for dp
+        alpha = 28.5     # for dp
         #alpha = 15
         eps = 100
     elif m == "log-reg-c":
@@ -65,8 +65,8 @@ for i in range(1):
     model = model.to(device)
 
     # for dp
-    train_loader = DataLoader(data_train, shuffle = True, batch_size = 128)
-    test_loader = DataLoader(data_test, shuffle = False, batch_size= 128)
+    train_loader = DataLoader(data_train, shuffle = True, batch_size = 256)
+    test_loader = DataLoader(data_test, shuffle = False, batch_size= 256)
 
     # for eo
     #train_loader = DataLoader(data_train, shuffle=True, batch_size=256)

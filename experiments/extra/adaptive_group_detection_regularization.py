@@ -61,8 +61,8 @@ class MLP_LR_context_detection_regularization(nn.Module):
         relu1 = self.relu1(hidden1)
         hidden2 = self.fc2(relu1)
         relu2 = self.relu2(hidden2)
-
         context_vector = self.context(relu2) #yes
+
         context_prediction_vectors = self.context(relu2)
 
         ###### adaptive prediction - we need to add this to our code to concat the context vector with the data

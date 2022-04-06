@@ -10,7 +10,7 @@ import numpy as np
 
 warnings.filterwarnings("ignore")
 
-m = "neural-net-c"
+m = "neural-net"
 
 no_cuda=False
 gpus='3'
@@ -39,7 +39,7 @@ for i in range(10):
         ep = 1e-8
     elif m == "neural-net":
         model = NN(input_size=10)
-        l = .0001
+        l = .0005
         beta = (0.9, 0.999)
         ep=1e-08
     elif m == "log-reg-c":
@@ -56,8 +56,8 @@ for i in range(10):
     model = model.double()
     model = model.to(device)
 
-    train_loader = DataLoader(data_train, shuffle = True, batch_size = 128)
-    test_loader = DataLoader(data_test, shuffle = False, batch_size= 128)
+    train_loader = DataLoader(data_train, shuffle = True, batch_size = 256)
+    test_loader = DataLoader(data_test, shuffle = False, batch_size= 256)
 
     optimizer = torch.optim.Adam(model.parameters(), lr = l, eps=ep, betas=beta)
     loss = nn.BCELoss(reduction='mean')   #binary logarithmic loss function

@@ -55,24 +55,24 @@ class LR_combo(nn.Module):
         super(LR_combo, self).__init__()
         self.input_size = input_size
         self.vector_size = vector_size
-        self.hidden_size = 100
+        self.hidden_size = 80#80
 
         # Logistic Regression
         self.fc1 = nn.Linear(self.input_size + self.vector_size, 1)
 
         # Context Network
         self.context_fc1 = nn.Linear(self.input_size, self.hidden_size)
-        self.context_relu1 = nn.LeakyReLU()
+        self.context_relu = nn.LeakyReLU()
         self.context_fc2 = nn.Linear(self.hidden_size, self.hidden_size)
-        self.context_relu2 = nn.LeakyReLU()
         self.context_fc3 = nn.Linear(self.hidden_size, self.vector_size)
+        self.LR_context = nn.Linear(vector_size, 1)
 
     def forward(self, x, context_only):
         # Pass through context network
         hidden1 = self.context_fc1(x)
-        relu1 = self.context_relu1(hidden1)
+        relu1 = self.context_relu(hidden1)
         hidden2 = self.context_fc2(relu1)
-        relu2 = self.context_relu2(hidden2)
+        relu2 = self.context_relu(hidden2)
         context_vector = self.context_fc3(relu2)
 
         ###### adaptive prediction
@@ -85,7 +85,11 @@ class LR_combo(nn.Module):
 
         x1 = self.fc1(prediction_vector)
         y = torch.sigmoid(x1)
-        return y
+
+        y_context = self.LR_context(context_vector)
+        y_context = torch.sigmoid(y_context)
+
+        return y, y_context
 
 class LR_HyperNet(nn.Module):
     def __init__(self, vector_size, hidden_dim, num_hidden):
@@ -101,11 +105,8 @@ class LR_HyperNet(nn.Module):
             nn.Linear(self.vector_size + self.embedding_dim, hidden_dim),  # [13, 100]
         ]
         for _ in range(n_hidden):
-            layers.append(nn.ReLU(inplace=True))
-            layers.append(
-                nn.Linear(hidden_dim, hidden_dim)
-            )
-        #layers.append(nn.Linear(hidden_dim, hidden_dim))
+            layers.append(nn.LeakyReLU(inplace=True))
+            layers.append(nn.Linear(hidden_dim, hidden_dim))
 
         self.mlp = nn.Sequential(*layers)
 
@@ -186,9 +187,9 @@ class NN_context(nn.Module):
     def forward(self, x):
         # Pass through context network
         hidden1 = self.context_fc1(x)
-        relu1 = self.context_relu1(hidden1)
+        relu1 = self.context_relu(hidden1)
         hidden2 = self.context_fc2(relu1)
-        relu2 = self.context_relu2(hidden2)
+        relu2 = self.context_relu(hidden2)
         context_vector = self.context_fc3(relu2)
 
         ###### adaptive prediction
@@ -215,7 +216,7 @@ class NN_combo(nn.Module):
         self.input_size = input_size
         self.vector_size = vector_size
         self.hidden_sizes = [10,10,10]
-        self.hidden_size = 10
+        self.hidden_size = 80
         self.dropout_rate = .45
 
         # NN
@@ -229,17 +230,17 @@ class NN_combo(nn.Module):
 
         # Context Network
         self.context_fc1 = nn.Linear(self.input_size, self.hidden_size)
-        self.context_relu1 = nn.LeakyReLU()
         self.context_fc2 = nn.Linear(self.hidden_size, self.hidden_size)
-        self.context_relu2 = nn.LeakyReLU()
         self.context_fc3 = nn.Linear(self.hidden_size, self.vector_size)
+        self.context_relu = nn.LeakyReLU()
+        self.NN_context = nn.Linear(vector_size, 1)
 
     def forward(self, x, context_only):
         # Pass through context network
         hidden1 = self.context_fc1(x)
-        relu1 = self.context_relu1(hidden1)
+        relu1 = self.context_relu(hidden1)
         hidden2 = self.context_fc2(relu1)
-        relu2 = self.context_relu2(hidden2)
+        relu2 = self.context_relu(hidden2)
         context_vector = self.context_fc3(relu2)
 
         ###### adaptive prediction
@@ -261,25 +262,28 @@ class NN_combo(nn.Module):
         x9 = self.fc5(x8)
         out = torch.sigmoid(x9)
 
-        return out
+        y_context = self.NN_context(context_vector)
+        y_context = torch.sigmoid(y_context)
+
+        return out, y_context
 
 class NN_HyperNet(nn.Module):
-    def __init__(self, vector_size, hidden_dim):
+    def __init__(self, vector_size, hidden_dim, num_hidden):
         super().__init__()
+        self.embedding_dim = 10
+        self.embeddings = nn.Embedding(num_embeddings=2, embedding_dim=self.embedding_dim)
 
         self.hidden_dim = hidden_dim
         self.vector_size = vector_size
 
-        n_hidden = 3#2#3
+        n_hidden = num_hidden
 
         layers = [
-            nn.Linear(self.vector_size, hidden_dim),  # [13, 100]
+            nn.Linear(self.vector_size + self.embedding_dim, hidden_dim),  # [13, 100]
         ]
         for _ in range(n_hidden):
             layers.append(nn.LeakyReLU(inplace=True))
             layers.append(nn.Linear(hidden_dim, hidden_dim))
-
-        #layers.append(nn.Linear(hidden_dim, hidden_dim))
 
         self.mlp = nn.Sequential(*layers)
 
@@ -296,11 +300,15 @@ class NN_HyperNet(nn.Module):
 
 
     # Do a forward pass
-    def forward(self, context_vec):
-        context_vec = context_vec.view(1,self.vector_size) #[1,13]
+    def forward(self, context_vec, idx):
+        emd = self.embeddings(idx)
+
+        context_vec = context_vec.view(1, self.vector_size)  # [1,13]
+        hnet_vector = context_vec.expand(len(context_vec), self.embedding_dim)
+        hnet_vector = torch.cat((emd, hnet_vector), dim=1)
 
         # Generate the weight output features by passing the context_vector through the hypernetwork mlp
-        features = self.mlp(context_vec)
+        features = self.mlp(hnet_vector)
 
         weights = OrderedDict({
             "fc1.weight": self.fc1_weights(features).view(10, 20),

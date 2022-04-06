@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 from collections import OrderedDict
 from utils import seed_everything, plot_roc_curves, get_data, confusion_matrix, metrics
 from models import LR_combo, NN_combo, LR_HyperNet, NN_HyperNet
+from fairtorch import DemographicParityLoss
 
 warnings.filterwarnings("ignore")
 
@@ -40,27 +41,27 @@ all_times_2, all_roc_2 = [], []
 
 clients = 2
 
-for i in range(10):
+for i in range(1):
     print('Round: ', i)
     seed_everything(0)
     if m == "log-reg-two-fl":
-        c1_model = LR_combo(input_size=10, vector_size=10)
-        c2_model = LR_combo(input_size=10, vector_size=10)
-        hnet = LR_HyperNet(vector_size=10, hidden_dim=10)  # 100
-        c1_l = 7e-3
-        c2_l = 1.e-3
-        o_l = 5e-5
+        c1_model = LR_combo(input_size=9, vector_size=9)
+        c2_model = LR_combo(input_size=9, vector_size=9)
+        hnet = LR_HyperNet(vector_size=9, hidden_dim=100, num_hidden=2)  # 100
+        c1_l = .006 #.005
+        c2_l = .002 #.003
+        o_l = .0004
+        step = 10
+        ep = 25
+    elif m == "neural-net-two-fl":
+        c1_model = NN_combo(input_size=9, vector_size=9)
+        c2_model = NN_combo(input_size=9, vector_size=9)
+        hnet = NN_HyperNet(vector_size=9, hidden_dim=100, num_hidden= 3)
+        c1_l = .003
+        c2_l = .005
+        o_l = .002
         step = 5
         ep = 50
-    elif m == "neural-net-two-fl":
-        c1_model = NN_combo(input_size=10, vector_size=10)
-        c2_model = NN_combo(input_size=10, vector_size=10)
-        hnet = NN_HyperNet(vector_size=10, hidden_dim=10)
-        c1_l = 7e-3#.0003
-        c2_l = .001
-        o_l = 5e-3#1e-2
-        step = 5#6
-        ep = 50#25
 
     c1_model = c1_model.double()
     c2_model = c2_model.double()
@@ -77,8 +78,9 @@ for i in range(10):
     optimizer = torch.optim.Adam(hnet.parameters(), lr= o_l)
     c1_inner_optimizer = torch.optim.Adam(c1_model.parameters(), lr = c1_l)
     c2_inner_optimizer = torch.optim.Adam(c2_model.parameters(), lr = c2_l)
-    
-    loss = nn.BCELoss(reduction='mean')   #binary logarithmic loss function
+
+    context_loss = torch.nn.KLDivLoss()
+    loss = nn.BCEWithLogitsLoss(reduction='mean')   #binary logarithmic loss function
     
     c1_loss_values, c1_test_loss_values =[], []
     c1_acc_values, c1_test_acc, c1_f_acc, c1_m_acc = [], [], [], []
@@ -116,12 +118,14 @@ for i in range(10):
             if c == 0:
                 data_train = data_train_1
                 data_test = data_test_1
+                dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=29.5)
             else:
                 data_train = data_train_2
                 data_test = data_test_2
+                dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=3)
     
-            train_loader = DataLoader(data_train, shuffle=True, batch_size=128)
-            test_loader = DataLoader(data_test, shuffle=False, batch_size=128)
+            train_loader = DataLoader(data_train, shuffle=True, batch_size=256)
+            test_loader = DataLoader(data_test, shuffle=False, batch_size=256)
             
             #load baseline
             hnet.load_state_dict(torch.load('hnet_baseline_weights.pth'))
@@ -141,11 +145,11 @@ for i in range(10):
                 running_loss = 0.0
                 correct = 0
     
-                for i, (x, y) in enumerate(train_loader):
+                for i, (x, y, s) in enumerate(train_loader):
                     if epoch == 0 and i == 0:
                         context_vectors, avg_context_vector, prediction_vector = model(x.to(device), context_only=True)
     
-                        weights = hnet(avg_context_vector)
+                        weights = hnet(avg_context_vector, torch.tensor([c], dtype=torch.long).to(device))
                         net_dict = model.state_dict()
                         hnet_dict = {k: v for k, v in weights.items() if k in net_dict}
                         net_dict.update(hnet_dict)
@@ -156,11 +160,14 @@ for i in range(10):
                     inner_optimizer.zero_grad()
                     optimizer.zero_grad()
     
-                    y_ = model(x.to(device), context_only=False)
-                    err = loss(y_, y.unsqueeze(1).to(device))
+                    y_, y_raw, y_context = model(x.to(device), context_only=False)
+                    err = loss(y_raw, y.unsqueeze(1).to(device)) + dp_loss(x.float(), y_raw.float(), s.float())
                     err = err.mean()
-                    running_loss += err.item() * x.size(0)
-                    err.backward()
+                    loss_context = context_loss(torch.cat((y_, 1 - y_), dim=1),
+                                                torch.cat((y_context, 1 - y_context), dim=1))
+                    loss_all = err + .1 * torch.abs(err - loss_context)
+                    running_loss += loss_all.item() * x.size(0)
+                    loss_all.backward()
                     inner_optimizer.step()
     
                     preds = y_.detach().cpu().round().reshape(1, len(y_))
@@ -187,9 +194,9 @@ for i in range(10):
                 total = 0.0
                 correct = 0.0
                 with torch.no_grad():
-                    for i, (x, y) in enumerate(test_loader):
-                        pred = model(x.to(device), context_only=False)
-                        test_err = loss(pred.flatten(), y.to(device))
+                    for i, (x, y, s) in enumerate(test_loader):
+                        pred, pred_raw, _ = model(x.to(device), context_only=False)
+                        test_err = loss(pred_raw.flatten(), y.to(device))
                         test_err = test_err.mean()
                         running_loss_test += test_err.item() * x.size(0)
                         
@@ -200,7 +207,7 @@ for i in range(10):
                         predicted_prediction = preds.type(torch.IntTensor).numpy().reshape(-1)
                         labels_pred = y.type(torch.IntTensor).numpy().reshape(-1)
 
-                        TP, FP, FN, TN, f_tp, f_fp, f_tn, f_fn, m_tp, m_fp, m_tn, m_fn = confusion_matrix(x,
+                        TP, FP, FN, TN, f_tp, f_fp, f_tn, f_fn, m_tp, m_fp, m_tn, m_fn = confusion_matrix(s,
                                                                                                           predicted_prediction,
                                                                                                           labels_pred,
                                                                                                           TP,
@@ -233,15 +240,15 @@ for i in range(10):
                     loss_values = c2_loss_values
                     test_loss_values = c2_test_loss_values
     
-                # if epoch == epochs - 1 and step == steps-1:
-                #     plt.plot(loss_values, label='Train Loss')
-                #     plt.plot(test_loss_values, label='Test Loss')
-                #     plt.xlabel('Epoch')
-                #     plt.ylabel('Loss')
-                #     title_loss = 'Loss over Epochs for FL HN Adaptive LR Model on COMPAS - Client ' + str(c + 1)
-                #     plt.title(title_loss)
-                #     plt.legend(loc="upper right")
-                #     plt.show()
+                if epoch == epochs - 1 and step == steps-1:
+                    plt.plot(loss_values, label='Train Loss')
+                    plt.plot(test_loss_values, label='Test Loss')
+                    plt.xlabel('Epoch')
+                    plt.ylabel('Loss')
+                    title_loss = 'Loss over Epochs for FL HN Adaptive LR Model on COMPAS - Client ' + str(c + 1)
+                    plt.title(title_loss)
+                    plt.legend(loc="upper right")
+                    plt.show()
     
                 if c == 0:
                     res = (
