@@ -13,7 +13,7 @@ from fairtorch import DemographicParityLoss
 
 warnings.filterwarnings("ignore")
 
-m = "neural-net-two-fl"
+m = "log-reg-two-fl"
 
 no_cuda=False
 gpus='4'
@@ -47,12 +47,12 @@ for i in range(1):
     if m == "log-reg-two-fl":
         c1_model = LR_combo(input_size=9, vector_size=9)
         c2_model = LR_combo(input_size=9, vector_size=9)
-        hnet = LR_HyperNet(vector_size=9, hidden_dim=100, num_hidden=2)  # 100
-        c1_l = .006 #.005
-        c2_l = .002 #.003
-        o_l = .0004
+        hnet = LR_HyperNet(vector_size=9, hidden_dim=100, num_hidden=3)
+        c1_l = .0001
+        c2_l = .0001
+        o_l = .0001
         step = 10
-        ep = 25
+        ep = 20
     elif m == "neural-net-two-fl":
         c1_model = NN_combo(input_size=9, vector_size=9)
         c2_model = NN_combo(input_size=9, vector_size=9)
@@ -118,11 +118,11 @@ for i in range(1):
             if c == 0:
                 data_train = data_train_1
                 data_test = data_test_1
-                dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=29.5)
+                dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=1)
             else:
                 data_train = data_train_2
                 data_test = data_test_2
-                dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=3)
+                dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=1)
     
             train_loader = DataLoader(data_train, shuffle=True, batch_size=256)
             test_loader = DataLoader(data_test, shuffle=False, batch_size=256)
@@ -160,14 +160,14 @@ for i in range(1):
                     inner_optimizer.zero_grad()
                     optimizer.zero_grad()
     
-                    y_, y_raw, y_context = model(x.to(device), context_only=False)
-                    err = loss(y_raw, y.unsqueeze(1).to(device)) + dp_loss(x.float(), y_raw.float(), s.float())
+                    y_, y_raw = model(x.to(device), context_only=False)
+                    err = loss(y_raw.flatten(), y.to(device)) + dp_loss(x.float(), y_raw.float(), s.float())
                     err = err.mean()
-                    loss_context = context_loss(torch.cat((y_, 1 - y_), dim=1),
-                                                torch.cat((y_context, 1 - y_context), dim=1))
-                    loss_all = err + .1 * torch.abs(err - loss_context)
-                    running_loss += loss_all.item() * x.size(0)
-                    loss_all.backward()
+                    # loss_context = context_loss(torch.cat((y_, 1 - y_), dim=1),
+                    #                             torch.cat((y_context, 1 - y_context), dim=1))
+                    # loss_all = err + .1 * torch.abs(err - loss_context)
+                    running_loss += err.item() * x.size(0)
+                    err.backward()
                     inner_optimizer.step()
     
                     preds = y_.detach().cpu().round().reshape(1, len(y_))
@@ -195,7 +195,7 @@ for i in range(1):
                 correct = 0.0
                 with torch.no_grad():
                     for i, (x, y, s) in enumerate(test_loader):
-                        pred, pred_raw, _ = model(x.to(device), context_only=False)
+                        pred, pred_raw = model(x.to(device), context_only=False)
                         test_err = loss(pred_raw.flatten(), y.to(device))
                         test_err = test_err.mean()
                         running_loss_test += test_err.item() * x.size(0)

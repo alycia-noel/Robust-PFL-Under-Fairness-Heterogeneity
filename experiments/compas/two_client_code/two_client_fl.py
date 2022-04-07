@@ -35,7 +35,7 @@ all_EOD_2, all_SPD_2, all_AOD_2 = [], [], []
 all_times_2, all_roc_2 = [], []
 
 clients = 2
-m = "neural-net-two-fl"
+m = "log-reg-two-fl"
 for i in range(1):
     print('Round:', i)
     seed_everything(0)
@@ -44,12 +44,12 @@ for i in range(1):
     if m == "log-reg-two-fl":
         c1_model = LR_combo(input_size=10, vector_size=10)
         c2_model = LR_combo(input_size=10, vector_size=10)
-        hnet = LR_HyperNet(vector_size=10, hidden_dim=100, num_hidden=2)
-        c1_l = .008
-        c2_l = .002
-        o_l = .0005
+        hnet = LR_HyperNet(vector_size=10, hidden_dim=100, num_hidden=3) #2
+        c1_l = .009
+        c2_l = .003
+        o_l = .0008
         step = 10
-        ep = 10
+        ep = 20
     elif m == "neural-net-two-fl":
         c1_model = NN_combo(input_size=10, vector_size=10)
         c2_model = NN_combo(input_size=10, vector_size=10)
@@ -156,15 +156,15 @@ for i in range(1):
                     inner_optimizer.zero_grad()
                     optimizer.zero_grad()
 
-                    y_, y_context = model(x.to(device), context_only=False)
+                    y_ = model(x.to(device), context_only=False)
                     err = loss(y_, y.unsqueeze(1).to(device))
                     err = err.mean()
-                    loss_context = context_loss(torch.cat((y_, 1 - y_), dim=1),
-                                                     torch.cat((y_context, 1 - y_context), dim=1))
-
-                    loss_all = err + .1 * torch.abs(err - loss_context)
-                    loss_all.backward()
-                    running_loss += loss_all.item() * x.size(0)
+                    # loss_context = context_loss(torch.cat((y_, 1 - y_), dim=1),
+                    #                                  torch.cat((y_context, 1 - y_context), dim=1))
+                    #
+                    # loss_all = err + .1 * torch.abs(err - loss_context)
+                    err.backward()
+                    running_loss += err.item() * x.size(0)
                     torch.nn.utils.clip_grad_norm_(hnet.parameters(), 50)
                     inner_optimizer.step()
 
@@ -193,7 +193,7 @@ for i in range(1):
                 correct = 0.0
                 with torch.no_grad():
                     for i, (x, y) in enumerate(test_loader):
-                        pred, pred_ = model(x.to(device), context_only=False)
+                        pred = model(x.to(device), context_only=False)
                         test_err = loss(pred.flatten(), y.to(device))
                         test_err = test_err.mean()
                         running_loss_test += test_err.item() * x.size(0)
@@ -238,15 +238,15 @@ for i in range(1):
                     loss_values = c2_loss_values
                     test_loss_values = c2_test_loss_values
 
-                if epoch == epochs - 1 and step == steps-1:
-                    plt.plot(loss_values, label='Train Loss')
-                    plt.plot(test_loss_values, label='Test Loss')
-                    plt.xlabel('Epoch')
-                    plt.ylabel('Loss')
-                    title_loss = 'Loss over Epochs for FL HN Adaptive LR Model on COMPAS - Client ' + str(c + 1)
-                    plt.title(title_loss)
-                    plt.legend(loc="upper right")
-                    plt.show()
+                # if epoch == epochs - 1 and step == steps-1:
+                #     plt.plot(loss_values, label='Train Loss')
+                #     plt.plot(test_loss_values, label='Test Loss')
+                #     plt.xlabel('Epoch')
+                #     plt.ylabel('Loss')
+                #     title_loss = 'Loss over Epochs for FL HN Adaptive LR Model on COMPAS - Client ' + str(c + 1)
+                #     plt.title(title_loss)
+                #     plt.legend(loc="upper right")
+                #     plt.show()
 
                 if c == 0:
                     res = (

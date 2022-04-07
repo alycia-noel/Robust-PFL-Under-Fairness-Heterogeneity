@@ -53,25 +53,26 @@ class LR_combo(nn.Module):
         super(LR_combo, self).__init__()
         self.input_size = input_size
         self.vector_size = vector_size
-        self.hidden_size = 80
+        self.hidden_size = 100#80
 
         # Logistic Regression
         self.fc1 = nn.Linear(self.input_size + self.vector_size, 1)
 
         # Context Network
         self.context_fc1 = nn.Linear(self.input_size, self.hidden_size)
-        self.context_relu1 = nn.LeakyReLU()
         self.context_fc2 = nn.Linear(self.hidden_size, self.hidden_size)
-        self.context_relu2 = nn.LeakyReLU()
         self.context_fc3 = nn.Linear(self.hidden_size, self.vector_size)
-        self.LR_context = nn.Linear(vector_size, 1)
+        self.batchnorm = nn.BatchNorm1d(self.hidden_size)
+        self.context_relu = nn.LeakyReLU()
 
     def forward(self, x, context_only):
         # Pass through context network
         hidden1 = self.context_fc1(x)
-        relu1 = self.context_relu1(hidden1)
+        norm1 = self.batchnorm(hidden1)
+        relu1 = self.context_relu(norm1)
         hidden2 = self.context_fc2(relu1)
-        relu2 = self.context_relu2(hidden2)
+        norm2 = self.batchnorm(hidden2)
+        relu2 = self.context_relu(norm2)
         context_vector = self.context_fc3(relu2)
 
         ###### adaptive prediction
@@ -85,10 +86,7 @@ class LR_combo(nn.Module):
         x1 = self.fc1(prediction_vector)
         y = torch.sigmoid(x1)
 
-        y_context = self.LR_context(context_vector)
-        y_context = torch.sigmoid(y_context)
-
-        return y, x1, y_context
+        return y, x1
 
 class LR_HyperNet(nn.Module):
     def __init__(self, vector_size, hidden_dim, num_hidden):
