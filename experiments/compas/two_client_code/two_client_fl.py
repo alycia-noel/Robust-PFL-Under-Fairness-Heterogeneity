@@ -36,14 +36,14 @@ all_times_2, all_roc_2 = [], []
 
 clients = 2
 m = "log-reg-two-fl"
-for i in range(1):
+for i in range(10):
     print('Round:', i)
     seed_everything(0)
     data_train_1, data_test_1, data_train_2, data_test_2, features_1, features_2, decision_1, decision_2, d_test_1, d_test_2, encoders = get_data()
 
     if m == "log-reg-two-fl":
-        c1_model = LR_combo(input_size=10, vector_size=10)
-        c2_model = LR_combo(input_size=10, vector_size=10)
+        c1_model = LR_combo(input_size=10, vector_size=10, hidden_size=100)
+        c2_model = LR_combo(input_size=10, vector_size=10, hidden_size=100)
         hnet = LR_HyperNet(vector_size=10, hidden_dim=100, num_hidden=3) #2
         c1_l = .009
         c2_l = .003
@@ -159,10 +159,7 @@ for i in range(1):
                     y_ = model(x.to(device), context_only=False)
                     err = loss(y_, y.unsqueeze(1).to(device))
                     err = err.mean()
-                    # loss_context = context_loss(torch.cat((y_, 1 - y_), dim=1),
-                    #                                  torch.cat((y_context, 1 - y_context), dim=1))
-                    #
-                    # loss_all = err + .1 * torch.abs(err - loss_context)
+
                     err.backward()
                     running_loss += err.item() * x.size(0)
                     torch.nn.utils.clip_grad_norm_(hnet.parameters(), 50)

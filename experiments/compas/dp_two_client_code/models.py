@@ -49,11 +49,11 @@ class LR_context(nn.Module):
         return y, x1
 
 class LR_combo(nn.Module):
-    def __init__(self, input_size, vector_size):
+    def __init__(self, input_size, vector_size, hidden_size):
         super(LR_combo, self).__init__()
         self.input_size = input_size
         self.vector_size = vector_size
-        self.hidden_size = 100#80
+        self.hidden_size = hidden_size # 100
 
         # Logistic Regression
         self.fc1 = nn.Linear(self.input_size + self.vector_size, 1)
