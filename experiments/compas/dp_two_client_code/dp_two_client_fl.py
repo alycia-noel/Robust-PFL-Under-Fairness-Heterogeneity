@@ -44,8 +44,8 @@ try_eps = [20]
 lr_1 = [.01, .03, .05, .001, .003, .005, .0001, .0003, .0005]
 lr_2 = [.01, .03, .05, .001, .003, .005, .0001, .0003, .0005]
 lr_h = [.001, .003, .005, .0001, .0003, .0005]
-alpha_1 = [1, 10, 20, 50, 80, 100]
-alpha_2 = [1, 10, 20, 50, 80, 100]
+alpha_1 = [10, 15, 20, 50, 75, 80, 100]
+alpha_2 = [10, 15, 20, 50, 75, 80, 100]
 
 hyperparam = []
 
@@ -431,7 +431,7 @@ for e in try_eps:
                         # all_roc_2.append(plot_roc_curves(c2_final_final_results, 'prediction', 'two_year_recid', size=(7, 5),
                         #
                         #                                  fname='./results/roc.png'))
-                        print('eps: {0};\t lr_1: {1:1.4f};\t lr_2: {2:1.4f}; \t lh: {3:1.4f}; \t a1: {4:1.3f};\t a2: {5:1.3f};\t C1 Accuracy: {6:1.3f};\t C2 Accuracy: {7:1.3f};\t C1 SPD: {8:1.3f};\t C2 SPD: {9:1.3f} '.format(e, l1, l2, lh, a1, a2,all_acc_1[len(all_acc_1) - 1],all_acc_2[len(all_acc_2) - 1] , all_SPD_1[len(all_SPD_1) - 1],all_SPD_2[len(all_SPD_2) -1 ] ))
+                        print('eps: {0};\t lr_1: {1:1.4f};\t lr_2: {2:1.4f};\t lh: {3:1.4f};\t a1: {4};\t a2: {5:};\t C1 Accuracy: {6:1.3f};\t C2 Accuracy: {7:1.3f};\t C1 SPD: {8:1.4f};\t C2 SPD: {9:1.4f} '.format(e, l1, l2, lh, a1, a2,all_acc_1[len(all_acc_1) - 1],all_acc_2[len(all_acc_2) - 1] , all_SPD_1[len(all_SPD_1) - 1],all_SPD_2[len(all_SPD_2) -1 ] ))
                         add_to_dict = {'eps':e, 'lr_h': lh, 'c1_l': l1, 'c2_l': l2, 'c1 acc': all_acc_1[len(all_acc_1) - 1], 'c2 acc':all_acc_2[len(all_acc_2) - 1], 'SPD 1': all_SPD_1[len(all_SPD_1) - 1], 'SPD 2': all_SPD_2[len(all_SPD_2) -1 ] }
                         hyperparam.append(add_to_dict)
                         with open('hyperparam.txt', 'w') as f:
