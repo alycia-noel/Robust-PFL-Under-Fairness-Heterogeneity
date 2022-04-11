@@ -212,12 +212,12 @@ class NN_context(nn.Module):
         return out, x9
 
 class NN_combo(nn.Module):
-    def __init__(self, input_size, vector_size):
+    def __init__(self, input_size, vector_size, hidden_size):
         super(NN_combo, self).__init__()
         self.input_size = input_size
         self.vector_size = vector_size
         self.hidden_sizes = [10,10,10]
-        self.hidden_size = 80
+        self.hidden_size = hidden_size
         self.dropout_rate = .45
 
         # NN
@@ -235,7 +235,6 @@ class NN_combo(nn.Module):
         self.context_fc2 = nn.Linear(self.hidden_size, self.hidden_size)
         self.context_relu2 = nn.LeakyReLU()
         self.context_fc3 = nn.Linear(self.hidden_size, self.vector_size)
-        self.NN_context = nn.Linear(vector_size, 1)
 
     def forward(self, x, context_only):
         # Pass through context network
@@ -264,10 +263,7 @@ class NN_combo(nn.Module):
         x9 = self.fc5(x8)
         out = torch.sigmoid(x9)
 
-        y_context = self.NN_context(context_vector)
-        y_context = torch.sigmoid(y_context)
-
-        return out, x9, y_context
+        return out, x9
 
 class NN_HyperNet(nn.Module):
     def __init__(self, vector_size, hidden_dim,num_hidden):

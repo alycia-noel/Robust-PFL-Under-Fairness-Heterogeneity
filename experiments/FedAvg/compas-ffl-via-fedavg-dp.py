@@ -8,21 +8,17 @@ from utils import seed_everything, plot_roc_curves, get_data_dp, confusion_matri
 from models import LR, NN
 from fairtorch import DemographicParityLoss
 warnings.filterwarnings("ignore")
+import matplotlib.pyplot as plt
 
 no_cuda = False
 gpus = '5'
 device = torch.cuda.set_device(5)
 
-def train_dp(model, train_loader, loss, optimizer, i):
+def train_dp(model, train_loader, loss, optimizer, alpha):
     model.train()
     model = model.to(device)
     correct = 0
     running_loss = 0.0
-
-    if i == 0:
-        alpha = 70      # 70 for LR
-    elif i == 1:
-        alpha = 5     #50  # .5 for LR
 
     dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=alpha)
 
@@ -94,18 +90,18 @@ def send_main_model_to_nodes_and_update_model_dict(main_model, model_dict, numbe
         for i in range(number_of_samples):
             model_dict[name_of_models[i]].fc1.weight.data = main_model.fc1.weight.data.clone()
             model_dict[name_of_models[i]].fc1.bias.data = main_model.fc1.bias.data.clone()
-
-            model_dict[name_of_models[i]].fc2.weight.data = main_model.fc2.weight.data.clone()
-            model_dict[name_of_models[i]].fc2.bias.data = main_model.fc2.bias.data.clone()
-
-            model_dict[name_of_models[i]].fc3.weight.data = main_model.fc3.weight.data.clone()
-            model_dict[name_of_models[i]].fc3.bias.data = main_model.fc3.bias.data.clone()
-
-            model_dict[name_of_models[i]].fc4.weight.data = main_model.fc4.weight.data.clone()
-            model_dict[name_of_models[i]].fc4.bias.data = main_model.fc4.bias.data.clone()
-
-            model_dict[name_of_models[i]].fc5.weight.data = main_model.fc5.weight.data.clone()
-            model_dict[name_of_models[i]].fc5.bias.data = main_model.fc5.bias.data.clone()
+            #
+            # model_dict[name_of_models[i]].fc2.weight.data = main_model.fc2.weight.data.clone()
+            # model_dict[name_of_models[i]].fc2.bias.data = main_model.fc2.bias.data.clone()
+            #
+            # model_dict[name_of_models[i]].fc3.weight.data = main_model.fc3.weight.data.clone()
+            # model_dict[name_of_models[i]].fc3.bias.data = main_model.fc3.bias.data.clone()
+            #
+            # model_dict[name_of_models[i]].fc4.weight.data = main_model.fc4.weight.data.clone()
+            # model_dict[name_of_models[i]].fc4.bias.data = main_model.fc4.bias.data.clone()
+            #
+            # model_dict[name_of_models[i]].fc5.weight.data = main_model.fc5.weight.data.clone()
+            # model_dict[name_of_models[i]].fc5.bias.data = main_model.fc5.bias.data.clone()
 
         return model_dict
 
@@ -135,7 +131,10 @@ def create_model_optimizer_criterion_dict(number_of_samples):
     return model_dict, optimizer_dict, criterion_dict
 
 
-def start_train_end_node_process_print_some(number_of_samples, print_amount):
+def start_train_end_node_process_print_some(number_of_samples, print_amount, alpha):
+    running_loss_1 = []
+    running_loss_2 = []
+
     for i in range(number_of_samples):
 
         results = []
@@ -166,9 +165,10 @@ def start_train_end_node_process_print_some(number_of_samples, print_amount):
 
         start = time.time()
         for epoch in range(num_epoch):
-            train_loss, train_accuracy = train_dp(model.double(), train_dl, criterion, optimizer, i)
+            train_loss, train_accuracy = train_dp(model.double(), train_dl, criterion, optimizer, alpha)
             predictions, running_loss_test, f1_score_prediction, f1_female, f1_male, accuracy, f_acc, m_acc, error, f_err, m_err, aod, eod, spd, TP, FP, FN, TN, f_tp, f_fp, f_tn, f_fn, m_tp, m_fp, m_tn, m_fn = validation_dp(
                 model.double(), test_dl, criterion)
+
 
             f1.append(f1_score_prediction)
             F_F1.append(f1_female)
@@ -178,6 +178,7 @@ def start_train_end_node_process_print_some(number_of_samples, print_amount):
             EOD.append(eod)
 
             if i == 0:
+                running_loss_1.append(running_loss_test)
                 res = (
                     pd.DataFrame(columns=features_1, index=d_test_1.index)
                         .add_suffix('_partial')
@@ -186,6 +187,7 @@ def start_train_end_node_process_print_some(number_of_samples, print_amount):
                         .assign(round=epoch)
                 )
             else:
+                running_loss_2.append(running_loss_test)
                 res = (
                     pd.DataFrame(columns=features_2, index=d_test_2.index)
                         .add_suffix('_partial')
@@ -217,8 +219,8 @@ def start_train_end_node_process_print_some(number_of_samples, print_amount):
             M_FN.append(m_fn)
             M_FP.append(m_fp)
 
-        print("client: {}".format(i+1) + " | epoch: {:3.0f}".format(epoch + 1) + " | train accuracy: {:7.5f}".format(
-            train_accuracy) + " | test accuracy: {:7.5f}".format(accuracy))
+        #print("client: {}".format(i+1) + " | epoch: {:3.0f}".format(epoch + 1) + " | train accuracy: {:7.5f}".format(
+        #    train_accuracy) + " | test accuracy: {:7.5f}".format(accuracy))
 
         results = pd.concat(results)
 
@@ -293,77 +295,78 @@ def start_train_end_node_process_print_some(number_of_samples, print_amount):
             all_roc_2.append(
                 plot_roc_curves(results, 'prediction', 'two_year_recid', size=(7, 5), fname='./results/roc.png'))
 
+    return running_loss_1, running_loss_2
 
 def get_averaged_weights(model_dict, number_of_samples):
     fc1_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc1.weight.shape)
     fc1_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc1.bias.shape)
 
-    fc2_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc2.weight.shape)
-    fc2_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc2.bias.shape)
-
-    fc3_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc3.weight.shape)
-    fc3_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc3.bias.shape)
-
-    fc4_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc4.weight.shape)
-    fc4_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc4.bias.shape)
-
-    fc5_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc5.weight.shape)
-    fc5_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc5.bias.shape)
+    # fc2_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc2.weight.shape)
+    # fc2_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc2.bias.shape)
+    #
+    # fc3_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc3.weight.shape)
+    # fc3_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc3.bias.shape)
+    #
+    # fc4_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc4.weight.shape)
+    # fc4_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc4.bias.shape)
+    #
+    # fc5_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc5.weight.shape)
+    # fc5_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc5.bias.shape)
 
     with torch.no_grad():
         for i in range(number_of_samples):
             fc1_mean_weight += model_dict[name_of_models[i]].fc1.weight.data.clone()
             fc1_mean_bias += model_dict[name_of_models[i]].fc1.bias.data.clone()
 
-            fc2_mean_weight += model_dict[name_of_models[i]].fc2.weight.data.clone()
-            fc2_mean_bias += model_dict[name_of_models[i]].fc2.bias.data.clone()
-
-            fc3_mean_weight += model_dict[name_of_models[i]].fc3.weight.data.clone()
-            fc3_mean_bias += model_dict[name_of_models[i]].fc3.bias.data.clone()
-
-            fc4_mean_weight += model_dict[name_of_models[i]].fc4.weight.data.clone()
-            fc4_mean_bias += model_dict[name_of_models[i]].fc4.bias.data.clone()
-
-            fc5_mean_weight += model_dict[name_of_models[i]].fc5.weight.data.clone()
-            fc5_mean_bias += model_dict[name_of_models[i]].fc5.bias.data.clone()
+            # fc2_mean_weight += model_dict[name_of_models[i]].fc2.weight.data.clone()
+            # fc2_mean_bias += model_dict[name_of_models[i]].fc2.bias.data.clone()
+            #
+            # fc3_mean_weight += model_dict[name_of_models[i]].fc3.weight.data.clone()
+            # fc3_mean_bias += model_dict[name_of_models[i]].fc3.bias.data.clone()
+            #
+            # fc4_mean_weight += model_dict[name_of_models[i]].fc4.weight.data.clone()
+            # fc4_mean_bias += model_dict[name_of_models[i]].fc4.bias.data.clone()
+            #
+            # fc5_mean_weight += model_dict[name_of_models[i]].fc5.weight.data.clone()
+            # fc5_mean_bias += model_dict[name_of_models[i]].fc5.bias.data.clone()
 
         fc1_mean_weight = fc1_mean_weight / number_of_samples
         fc1_mean_bias = fc1_mean_bias / number_of_samples
 
-        fc2_mean_weight = fc2_mean_weight / number_of_samples
-        fc2_mean_bias = fc2_mean_bias / number_of_samples
+        # fc2_mean_weight = fc2_mean_weight / number_of_samples
+        # fc2_mean_bias = fc2_mean_bias / number_of_samples
+        #
+        # fc3_mean_weight = fc3_mean_weight / number_of_samples
+        # fc3_mean_bias = fc3_mean_bias / number_of_samples
+        #
+        # fc4_mean_weight = fc4_mean_weight / number_of_samples
+        # fc4_mean_bias = fc4_mean_bias / number_of_samples
+        #
+        # fc5_mean_weight = fc5_mean_weight / number_of_samples
+        # fc5_mean_bias = fc5_mean_bias / number_of_samples
 
-        fc3_mean_weight = fc3_mean_weight / number_of_samples
-        fc3_mean_bias = fc3_mean_bias / number_of_samples
-
-        fc4_mean_weight = fc4_mean_weight / number_of_samples
-        fc4_mean_bias = fc4_mean_bias / number_of_samples
-
-        fc5_mean_weight = fc5_mean_weight / number_of_samples
-        fc5_mean_bias = fc5_mean_bias / number_of_samples
-
-    return fc1_mean_weight, fc1_mean_bias, fc2_mean_weight, fc2_mean_bias, fc3_mean_weight, fc3_mean_bias, fc4_mean_weight, fc4_mean_bias, fc5_mean_weight, fc5_mean_bias
+    return fc1_mean_weight, fc1_mean_bias#, fc2_mean_weight, fc2_mean_bias, fc3_mean_weight, fc3_mean_bias, fc4_mean_weight, fc4_mean_bias, fc5_mean_weight, fc5_mean_bias
 
 
 def set_averaged_weights_as_main_model_weights_and_update_main_model(main_model,model_dict, number_of_samples):
-    fc1_mean_weight, fc1_mean_bias, fc2_mean_weight, fc2_mean_bias, fc3_mean_weight, fc3_mean_bias, fc4_mean_weight, fc4_mean_bias, fc5_mean_weight, fc5_mean_bias = get_averaged_weights(model_dict, number_of_samples=number_of_samples)
-    #fc1_mean_weight, fc1_mean_bias = get_averaged_weights(model_dict, number_of_samples=number_of_samples)
+    # fc1_mean_weight, fc1_mean_bias, fc2_mean_weight, fc2_mean_bias, fc3_mean_weight, fc3_mean_bias, fc4_mean_weight, fc4_mean_bias, fc5_mean_weight, fc5_mean_bias = get_averaged_weights(model_dict, number_of_samples=number_of_samples)
+    fc1_mean_weight, fc1_mean_bias = get_averaged_weights(model_dict, number_of_samples=number_of_samples)
 
     with torch.no_grad():
         main_model.fc1.weight.data = fc1_mean_weight.data.clone()
         main_model.fc1.bias.data = fc1_mean_bias.data.clone()
 
-        main_model.fc2.weight.data = fc2_mean_weight.data.clone()
-        main_model.fc2.bias.data = fc2_mean_bias.data.clone()
-
-        main_model.fc3.weight.data = fc3_mean_weight.data.clone()
-        main_model.fc3.bias.data = fc3_mean_bias.data.clone()
-
-        main_model.fc4.weight.data = fc4_mean_weight.data.clone()
-        main_model.fc4.bias.data = fc4_mean_bias.data.clone()
-
-        main_model.fc5.weight.data = fc5_mean_weight.data.clone()
-        main_model.fc5.bias.data = fc5_mean_bias.data.clone()
+        # main_model.fc2.weight.data = fc2_mean_weight.data.clone()
+        # main_model.fc2.bias.data = fc2_mean_bias.data.clone()
+        #
+        # main_model.fc3.weight.data = fc3_mean_weight.data.clone()
+        # main_model.fc3.bias.data = fc3_mean_bias.data.clone()
+        #
+        # main_model.fc4.weight.data = fc4_mean_weight.data.clone()
+        # main_model.fc4.bias.data = fc4_mean_bias.data.clone()
+        #
+        # main_model.fc5.weight.data = fc5_mean_weight.data.clone()
+        # main_model.fc5.bias.data = fc5_mean_bias.data.clone()
 
     return main_model
 
@@ -398,8 +401,8 @@ times_all, roc_all = [], []
 
 number_of_samples = 2  # i.e. number of clients
 batch_size = 128
-print_amount = 5
-m = "neural-net"
+print_amount = 0
+m = "log-reg"
 if m == "log-reg":
     main_model = LR(input_size=9)
     learning_rate = 7e-3
@@ -430,191 +433,232 @@ print('~~~ Start Training ~~~')
 print('~' * 22, '\n')
 results_main_model = []
 
-for i in range(10):
-    model_dict = send_main_model_to_nodes_and_update_model_dict(main_model, model_dict, number_of_samples)
-    start_train_end_node_process_print_some(number_of_samples, print_amount)
-    start = time.time()
-    main_model = set_averaged_weights_as_main_model_weights_and_update_main_model(main_model, model_dict,
-                                                                                  number_of_samples)
-    end = time.time()
-    predictions, running_loss_test, f1_score_prediction, f1_female, f1_male, accuracy, f_acc, m_acc, error, f_err, m_err, aod, eod, spd, TP, FP, FN, TN, f_tp, f_fp, f_tn, f_fn, m_tp, m_fp, m_tn, m_fn = validation_dp(
-        main_model.double(), test_dl, main_criterion)
+alpha_results_1 = []
+alpha_results_2 = []
 
-    times_all.append(end - start)
-    f1_all.append(f1_score_prediction)
-    F_F1_all.append(f1_female)
-    M_F1_all.append(f1_male)
-    AOD_all.append(aod)
-    SPD_all.append(spd)
-    EOD_all.append(eod)
+alphas = [1, 5, 10, 25, 50, 75, 100]
 
-    res = (
-        pd.DataFrame(columns=features_all, index=d_test_all.index)
-            .add_suffix('_partial')
-            .join(d_test_all)
-            .assign(prediction=predictions)
-            .assign(round=i)
-    )
+for j, alph in enumerate(alphas):
+    l_1, l_2 = [], []
+    for i in range(10):
+        model_dict = send_main_model_to_nodes_and_update_model_dict(main_model, model_dict, number_of_samples)
+        loss_1, loss_2 = start_train_end_node_process_print_some(number_of_samples, print_amount, alpha=alph)
 
-    results_main_model.append(res)
-    acc_all.append(accuracy)
-    F_ACC_all.append(f_acc)
-    M_ACC_all.append(m_acc)
-    test_error_all.append(error)
-    F_ERR_all.append(f_err)
-    M_ERR_all.append(m_err)
+        start = time.time()
+        main_model = set_averaged_weights_as_main_model_weights_and_update_main_model(main_model, model_dict,
+                                                                                      number_of_samples)
+        end = time.time()
+        predictions, running_loss_test, f1_score_prediction, f1_female, f1_male, accuracy, f_acc, m_acc, error, f_err, m_err, aod, eod, spd, TP, FP, FN, TN, f_tp, f_fp, f_tn, f_fn, m_tp, m_fp, m_tn, m_fn = validation_dp(
+            main_model.double(), test_dl, main_criterion)
 
-    tn_all.append(TN)
-    tp_all.append(TP)
-    fn_all.append(FN)
-    fp_all.append(FP)
+        l_1.extend(loss_1)
+        l_2.extend(loss_2)
+        times_all.append(end - start)
+        f1_all.append(f1_score_prediction)
+        F_F1_all.append(f1_female)
+        M_F1_all.append(f1_male)
+        AOD_all.append(aod)
+        SPD_all.append(spd)
+        EOD_all.append(eod)
 
-    F_TN_all.append(f_tn)
-    F_TP_all.append(f_tp)
-    F_FN_all.append(f_fn)
-    F_FP_all.append(f_fp)
+        res = (
+            pd.DataFrame(columns=features_all, index=d_test_all.index)
+                .add_suffix('_partial')
+                .join(d_test_all)
+                .assign(prediction=predictions)
+                .assign(round=i)
+        )
 
-    M_TN_all.append(m_tn)
-    M_TP_all.append(m_tp)
-    M_FN_all.append(m_fn)
-    M_FP_all.append(m_fp)
+        results_main_model.append(res)
+        acc_all.append(accuracy)
+        F_ACC_all.append(f_acc)
+        M_ACC_all.append(m_acc)
+        test_error_all.append(error)
+        F_ERR_all.append(f_err)
+        M_ERR_all.append(m_err)
 
-    print("\nIteration", str(i + 1), ": main_model accuracy on all test data: {:7.4f}".format(accuracy))
-    print("\n")
+        tn_all.append(TN)
+        tp_all.append(TP)
+        fn_all.append(FN)
+        fp_all.append(FP)
 
-results_all = pd.concat(results_main_model)
+        F_TN_all.append(f_tn)
+        F_TP_all.append(f_tp)
+        F_FN_all.append(f_fn)
+        F_FP_all.append(f_fp)
 
-for col, encoder in encoders.items():
-    results_all.loc[:, col] = encoder.inverse_transform(results_all[col])
+        M_TN_all.append(m_tn)
+        M_TP_all.append(m_tp)
+        M_FN_all.append(m_fn)
+        M_FP_all.append(m_fp)
 
-roc_all.append(plot_roc_curves(results_all, 'prediction', 'two_year_recid', size=(7, 5), fname='./results/roc.png'))
+        # print("\nIteration", str(i + 1), ": main_model accuracy on all test data: {:7.4f}".format(accuracy))
+        # print("\n")
 
-print('\n')
-print('~' * 30)
-print('~         Client One         ~')
-print('~' * 30)
-print('*******************')
-print('*       all       *')
-print('*******************')
-print('Test Accuracy: {0:1.3f}'.format(all_acc_1[len(all_acc_1) - 1]))
-print('Test Error: {0:1.3f}'.format(all_test_error_1[len(all_test_error_1) - 1]))
-print(
-    'TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(all_tp_1[len(all_tp_1) - 1],
-                                                                      all_fp_1[len(all_fp_1) - 1],
-                                                                      all_tn_1[len(all_tn_1) - 1],
-                                                                      all_fn_1[len(all_fn_1) - 1]))
-print('EOD: {0:1.4f}'.format(all_EOD_1[len(all_EOD_1) - 1]))
-print('SPD: {0:1.4f}'.format(all_SPD_1[len(all_SPD_1) - 1]))
-print('AOD: {0:1.4f}'.format(all_AOD_1[len(all_AOD_1) - 1]))
-print('F1: {0:1.3f}'.format(all_f1_1[len(all_f1_1) - 1]))
-print("")
-print('**********************')
-print('*       Female       *')
-print('**********************')
-print('Test Accuracy: {0:1.3f}'.format(all_f_acc_1[len(all_f_acc_1) - 1]))
-print('Test Error: {0:1.3f}'.format(all_F_ERR_1[len(all_F_ERR_1) - 1]))
-print('TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(all_F_TP_1[len(all_F_TP_1) - 1],
-                                                                        all_F_FP_1[len(all_F_FP_1) - 1],
-                                                                        all_F_TN_1[len(all_F_TN_1) - 1],
-                                                                        all_F_FN_1[len(all_F_FN_1) - 1]))
-print('F1: {0:1.3f}'.format(all_F_F1_1[len(all_F_F1_1) - 1]))
-print("")
-print('********************')
-print('*       Male       *')
-print('********************')
-print('Test Accuracy: {0:1.3f}'.format(all_m_acc_1[len(all_m_acc_1) - 1]))
-print('Test Error: {0:1.3f}'.format(all_M_ERR_1[len(all_M_ERR_1) - 1]))
-print('TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(all_M_TP_1[len(all_M_TP_1) - 1],
-                                                                        all_M_FP_1[len(all_M_FP_1) - 1],
-                                                                        all_M_TN_1[len(all_M_TN_1) - 1],
-                                                                        all_M_FN_1[len(all_M_FN_1) - 1]))
-print('F1: {0:1.3f}'.format(all_M_F1_1[len(all_M_F1_1) - 1]))
+    alpha_results_1.append(l_1)
+    alpha_results_2.append(l_2)
 
-print('Train Time: {0:1.2f}'.format(all_times_1[len(all_times_1) - 1]))
-print('AUROC: {0:1.2f}'.format(all_roc_1[len(all_roc_1) - 1]))
+plt.plot(alpha_results_1[0], label='a = 1')
+plt.plot(alpha_results_1[1], label='a = 5')
+plt.plot(alpha_results_1[2], label='a = 10')
+plt.plot(alpha_results_1[3], label='a = 25')
+plt.plot(alpha_results_1[4], label='a = 50')
+plt.plot(alpha_results_1[5], label='a = 75')
+plt.plot(alpha_results_1[6], label='a = 100')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+title_loss = 'Loss per Epochs for FFL via FedAvg using Fairness Weight a - Client ' + str(1)
+plt.title(title_loss)
+plt.legend(loc="upper right")
+plt.show()
 
-print('\n')
-print('~' * 30)
-print('~         Client Two         ~')
-print('~' * 30)
-print('*******************')
-print('*       all       *')
-print('*******************')
-print('Test Accuracy: {0:1.3f}'.format(all_acc_2[len(all_acc_2) - 1]))
-print('Test Error: {0:1.3f}'.format(all_test_error_2[len(all_test_error_2) - 1]))
-print(
-    'TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(all_tp_2[len(all_tp_2) - 1],
-                                                                      all_fp_2[len(all_fp_2) - 1],
-                                                                      all_tn_2[len(all_tn_2) - 1],
-                                                                      all_fn_2[len(all_fn_2) - 1]))
-print('EOD: {0:1.4f}'.format(all_EOD_2[len(all_EOD_2) - 1]))
-print('SPD: {0:1.4f}'.format(all_SPD_2[len(all_SPD_2) - 1]))
-print('AOD: {0:1.4f}'.format(all_AOD_2[len(all_AOD_2) - 1]))
-print('F1: {0:1.3f}'.format(all_f1_2[len(all_f1_2) - 1]))
-print("")
-print('**********************')
-print('*       Female       *')
-print('**********************')
-print('Test Accuracy: {0:1.3f}'.format(all_f_acc_2[len(all_f_acc_2) - 1]))
-print('Test Error: {0:1.3f}'.format(all_F_ERR_2[len(all_F_ERR_2) - 1]))
-print('TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(all_F_TP_2[len(all_F_TP_2) - 1],
-                                                                        all_F_FP_2[len(all_F_FP_2) - 1],
-                                                                        all_F_TN_2[len(all_F_TN_2) - 1],
-                                                                        all_F_FN_2[len(all_F_FN_2) - 1]))
-print('F1: {0:1.3f}'.format(all_F_F1_2[len(all_F_F1_2) - 1]))
-print("")
-print('********************')
-print('*       Male       *')
-print('********************')
-print('Test Accuracy: {0:1.3f}'.format(all_m_acc_2[len(all_m_acc_2) - 1]))
-print('Test Error: {0:1.3f}'.format(all_M_ERR_2[len(all_M_ERR_2) - 1]))
-print('TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(all_M_TP_2[len(all_M_TP_2) - 1],
-                                                                        all_M_FP_2[len(all_M_FP_2) - 1],
-                                                                        all_M_TN_2[len(all_M_TN_2) - 1],
-                                                                        all_M_FN_2[len(all_M_FN_2) - 1]))
-print('F1: {0:1.3f}'.format(all_M_F1_2[len(all_M_F1_2) - 1]))
+plt.plot(alpha_results_2[0], label='a = 1')
+plt.plot(alpha_results_2[1], label='a = 5')
+plt.plot(alpha_results_2[2], label='a = 10')
+plt.plot(alpha_results_2[3], label='a = 25')
+plt.plot(alpha_results_2[4], label='a = 50')
+plt.plot(alpha_results_2[5], label='a = 75')
+plt.plot(alpha_results_2[6], label='a = 100')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+title_loss = 'Loss per Epochs for FFL via FedAvg using Fairness Weight a - Client ' + str(2)
+plt.title(title_loss)
+plt.legend(loc="upper right")
+plt.show()
 
-print('Train Time: {0:1.2f}'.format(all_times_2[len(all_times_2) - 1]))
-print('AUROC: {0:1.2f}'.format(all_roc_2[len(all_roc_2) - 1]))
-
-print('\n')
-print('~' * 30)
-print('~        Global Model        ~')
-print('~' * 30)
-print('*******************')
-print('*       all       *')
-print('*******************')
-print('Test Accuracy: {0:1.3f}'.format(acc_all[len(acc_all) - 1]))
-print('Test Error: {0:1.3f}'.format(test_error_all[len(test_error_all) - 1]))
-print(
-    'TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(tp_all[len(tp_all) - 1], fp_all[len(fp_all) - 1],
-                                                                      tn_all[len(tn_all) - 1], fn_all[len(fn_all) - 1]))
-print('EOD: {0:1.4f}'.format(EOD_all[len(EOD_all) - 1]))
-print('SPD: {0:1.4f}'.format(SPD_all[len(SPD_all) - 1]))
-print('AOD: {0:1.4f}'.format(AOD_all[len(AOD_all) - 1]))
-print('F1: {0:1.3f}'.format(f1_all[len(f1_all) - 1]))
-print("")
-print('**********************')
-print('*       Female       *')
-print('**********************')
-print('Test Accuracy: {0:1.3f}'.format(F_ACC_all[len(F_ACC_all) - 1]))
-print('Test Error: {0:1.3f}'.format(F_ERR_all[len(F_ERR_all) - 1]))
-print('TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(F_TP_all[len(F_TP_all) - 1],
-                                                                        F_FP_all[len(F_FP_all) - 1],
-                                                                        F_TN_all[len(F_TN_all) - 1],
-                                                                        F_FN_all[len(F_FN_all) - 1]))
-print('F1: {0:1.3f}'.format(F_F1_all[len(F_F1_all) - 1]))
-print("")
-print('********************')
-print('*       Male       *')
-print('********************')
-print('Test Accuracy: {0:1.3f}'.format(M_ACC_all[len(M_ACC_all) - 1]))
-print('Test Error: {0:1.3f}'.format(M_ERR_all[len(M_ERR_all) - 1]))
-print('TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(M_TP_all[len(M_TP_all) - 1],
-                                                                        M_FP_all[len(M_FP_all) - 1],
-                                                                        M_TN_all[len(M_TN_all) - 1],
-                                                                        M_FN_all[len(M_FN_all) - 1]))
-print('F1: {0:1.3f}'.format(M_F1_all[len(M_F1_all) - 1]))
-
-print('Aggregate and Update Time: {0:1.2f}'.format(times_all[len(times_all) - 1]))
-print('AUROC: {0:1.2f}'.format(roc_all[len(roc_all) - 1]))
+# results_all = pd.concat(results_main_model)
+#
+# for col, encoder in encoders.items():
+#     results_all.loc[:, col] = encoder.inverse_transform(results_all[col])
+#
+# roc_all.append(plot_roc_curves(results_all, 'prediction', 'two_year_recid', size=(7, 5), fname='./results/roc.png'))
+#
+# print('\n')
+# print('~' * 30)
+# print('~         Client One         ~')
+# print('~' * 30)
+# print('*******************')
+# print('*       all       *')
+# print('*******************')
+# print('Test Accuracy: {0:1.3f}'.format(all_acc_1[len(all_acc_1) - 1]))
+# print('Test Error: {0:1.3f}'.format(all_test_error_1[len(all_test_error_1) - 1]))
+# print(
+#     'TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(all_tp_1[len(all_tp_1) - 1],
+#                                                                       all_fp_1[len(all_fp_1) - 1],
+#                                                                       all_tn_1[len(all_tn_1) - 1],
+#                                                                       all_fn_1[len(all_fn_1) - 1]))
+# print('EOD: {0:1.4f}'.format(all_EOD_1[len(all_EOD_1) - 1]))
+# print('SPD: {0:1.4f}'.format(all_SPD_1[len(all_SPD_1) - 1]))
+# print('AOD: {0:1.4f}'.format(all_AOD_1[len(all_AOD_1) - 1]))
+# print('F1: {0:1.3f}'.format(all_f1_1[len(all_f1_1) - 1]))
+# print("")
+# print('**********************')
+# print('*       Female       *')
+# print('**********************')
+# print('Test Accuracy: {0:1.3f}'.format(all_f_acc_1[len(all_f_acc_1) - 1]))
+# print('Test Error: {0:1.3f}'.format(all_F_ERR_1[len(all_F_ERR_1) - 1]))
+# print('TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(all_F_TP_1[len(all_F_TP_1) - 1],
+#                                                                         all_F_FP_1[len(all_F_FP_1) - 1],
+#                                                                         all_F_TN_1[len(all_F_TN_1) - 1],
+#                                                                         all_F_FN_1[len(all_F_FN_1) - 1]))
+# print('F1: {0:1.3f}'.format(all_F_F1_1[len(all_F_F1_1) - 1]))
+# print("")
+# print('********************')
+# print('*       Male       *')
+# print('********************')
+# print('Test Accuracy: {0:1.3f}'.format(all_m_acc_1[len(all_m_acc_1) - 1]))
+# print('Test Error: {0:1.3f}'.format(all_M_ERR_1[len(all_M_ERR_1) - 1]))
+# print('TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(all_M_TP_1[len(all_M_TP_1) - 1],
+#                                                                         all_M_FP_1[len(all_M_FP_1) - 1],
+#                                                                         all_M_TN_1[len(all_M_TN_1) - 1],
+#                                                                         all_M_FN_1[len(all_M_FN_1) - 1]))
+# print('F1: {0:1.3f}'.format(all_M_F1_1[len(all_M_F1_1) - 1]))
+#
+# print('Train Time: {0:1.2f}'.format(all_times_1[len(all_times_1) - 1]))
+# print('AUROC: {0:1.2f}'.format(all_roc_1[len(all_roc_1) - 1]))
+#
+# print('\n')
+# print('~' * 30)
+# print('~         Client Two         ~')
+# print('~' * 30)
+# print('*******************')
+# print('*       all       *')
+# print('*******************')
+# print('Test Accuracy: {0:1.3f}'.format(all_acc_2[len(all_acc_2) - 1]))
+# print('Test Error: {0:1.3f}'.format(all_test_error_2[len(all_test_error_2) - 1]))
+# print(
+#     'TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(all_tp_2[len(all_tp_2) - 1],
+#                                                                       all_fp_2[len(all_fp_2) - 1],
+#                                                                       all_tn_2[len(all_tn_2) - 1],
+#                                                                       all_fn_2[len(all_fn_2) - 1]))
+# print('EOD: {0:1.4f}'.format(all_EOD_2[len(all_EOD_2) - 1]))
+# print('SPD: {0:1.4f}'.format(all_SPD_2[len(all_SPD_2) - 1]))
+# print('AOD: {0:1.4f}'.format(all_AOD_2[len(all_AOD_2) - 1]))
+# print('F1: {0:1.3f}'.format(all_f1_2[len(all_f1_2) - 1]))
+# print("")
+# print('**********************')
+# print('*       Female       *')
+# print('**********************')
+# print('Test Accuracy: {0:1.3f}'.format(all_f_acc_2[len(all_f_acc_2) - 1]))
+# print('Test Error: {0:1.3f}'.format(all_F_ERR_2[len(all_F_ERR_2) - 1]))
+# print('TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(all_F_TP_2[len(all_F_TP_2) - 1],
+#                                                                         all_F_FP_2[len(all_F_FP_2) - 1],
+#                                                                         all_F_TN_2[len(all_F_TN_2) - 1],
+#                                                                         all_F_FN_2[len(all_F_FN_2) - 1]))
+# print('F1: {0:1.3f}'.format(all_F_F1_2[len(all_F_F1_2) - 1]))
+# print("")
+# print('********************')
+# print('*       Male       *')
+# print('********************')
+# print('Test Accuracy: {0:1.3f}'.format(all_m_acc_2[len(all_m_acc_2) - 1]))
+# print('Test Error: {0:1.3f}'.format(all_M_ERR_2[len(all_M_ERR_2) - 1]))
+# print('TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(all_M_TP_2[len(all_M_TP_2) - 1],
+#                                                                         all_M_FP_2[len(all_M_FP_2) - 1],
+#                                                                         all_M_TN_2[len(all_M_TN_2) - 1],
+#                                                                         all_M_FN_2[len(all_M_FN_2) - 1]))
+# print('F1: {0:1.3f}'.format(all_M_F1_2[len(all_M_F1_2) - 1]))
+#
+# print('Train Time: {0:1.2f}'.format(all_times_2[len(all_times_2) - 1]))
+# print('AUROC: {0:1.2f}'.format(all_roc_2[len(all_roc_2) - 1]))
+#
+# print('\n')
+# print('~' * 30)
+# print('~        Global Model        ~')
+# print('~' * 30)
+# print('*******************')
+# print('*       all       *')
+# print('*******************')
+# print('Test Accuracy: {0:1.3f}'.format(acc_all[len(acc_all) - 1]))
+# print('Test Error: {0:1.3f}'.format(test_error_all[len(test_error_all) - 1]))
+# print(
+#     'TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(tp_all[len(tp_all) - 1], fp_all[len(fp_all) - 1],
+#                                                                       tn_all[len(tn_all) - 1], fn_all[len(fn_all) - 1]))
+# print('EOD: {0:1.4f}'.format(EOD_all[len(EOD_all) - 1]))
+# print('SPD: {0:1.4f}'.format(SPD_all[len(SPD_all) - 1]))
+# print('AOD: {0:1.4f}'.format(AOD_all[len(AOD_all) - 1]))
+# print('F1: {0:1.3f}'.format(f1_all[len(f1_all) - 1]))
+# print("")
+# print('**********************')
+# print('*       Female       *')
+# print('**********************')
+# print('Test Accuracy: {0:1.3f}'.format(F_ACC_all[len(F_ACC_all) - 1]))
+# print('Test Error: {0:1.3f}'.format(F_ERR_all[len(F_ERR_all) - 1]))
+# print('TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(F_TP_all[len(F_TP_all) - 1],
+#                                                                         F_FP_all[len(F_FP_all) - 1],
+#                                                                         F_TN_all[len(F_TN_all) - 1],
+#                                                                         F_FN_all[len(F_FN_all) - 1]))
+# print('F1: {0:1.3f}'.format(F_F1_all[len(F_F1_all) - 1]))
+# print("")
+# print('********************')
+# print('*       Male       *')
+# print('********************')
+# print('Test Accuracy: {0:1.3f}'.format(M_ACC_all[len(M_ACC_all) - 1]))
+# print('Test Error: {0:1.3f}'.format(M_ERR_all[len(M_ERR_all) - 1]))
+# print('TP: {0:1.1f};\tFP: {1:1.1f};\tTN: {2:1.1f};\tFN {3:1.1f}'.format(M_TP_all[len(M_TP_all) - 1],
+#                                                                         M_FP_all[len(M_FP_all) - 1],
+#                                                                         M_TN_all[len(M_TN_all) - 1],
+#                                                                         M_FN_all[len(M_FN_all) - 1]))
+# print('F1: {0:1.3f}'.format(M_F1_all[len(M_F1_all) - 1]))
+#
+# print('Aggregate and Update Time: {0:1.2f}'.format(times_all[len(times_all) - 1]))
+# print('AUROC: {0:1.2f}'.format(roc_all[len(roc_all) - 1]))
