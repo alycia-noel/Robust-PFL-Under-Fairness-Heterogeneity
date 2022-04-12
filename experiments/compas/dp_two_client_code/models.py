@@ -103,6 +103,9 @@ class LR_HyperNet(nn.Module):
         layers = [
             nn.Linear(self.vector_size + self.embedding_dim, hidden_dim),  # [13, 100]
         ]
+        # layers = [
+        #     nn.Linear(self.embedding_dim, hidden_dim),  # [13, 100]
+        # ]
         for _ in range(n_hidden):
             layers.append(nn.LeakyReLU(inplace=True))
             layers.append(
@@ -279,6 +282,9 @@ class NN_HyperNet(nn.Module):
         layers = [
             nn.Linear(self.vector_size + self.embedding_dim, hidden_dim),  # [13, 100]
         ]
+        # layers = [
+        #     nn.Linear(self.embedding_dim, hidden_dim),  # [13, 100]
+        # ]
         for _ in range(n_hidden):
             layers.append(nn.LeakyReLU(inplace=True))
             layers.append(nn.Linear(hidden_dim, hidden_dim))

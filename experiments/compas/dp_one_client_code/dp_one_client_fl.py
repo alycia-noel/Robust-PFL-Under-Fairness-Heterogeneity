@@ -12,7 +12,7 @@ from utils import seed_everything, plot_roc_curves, get_data, confusion_matrix, 
 from models import LR_combo, LR_HyperNet, NN_combo, NN_HyperNet
 warnings.filterwarnings("ignore")
 
-m = "dp-neural-net-fl"
+m = "dp-log-reg-fl"
 
 no_cuda=False
 gpus='3'
@@ -46,7 +46,7 @@ for i in range(1):
         l_i = 5e-4
         step = 10
         ep = 10
-        alpha = 4
+        alpha = 50#4
         wd = 0
     elif m == "dp-neural-net-fl":
         model = NN_combo(input_size=9, vector_size=9)

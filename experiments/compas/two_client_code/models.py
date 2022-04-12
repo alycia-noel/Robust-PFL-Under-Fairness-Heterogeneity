@@ -99,8 +99,11 @@ class LR_HyperNet(nn.Module):
 
         n_hidden = num_hidden
 
+        # layers = [
+        #     nn.Linear(self.vector_size + self.embedding_dim, hidden_dim),  # [13, 100]
+        # ]
         layers = [
-            nn.Linear(self.vector_size + self.embedding_dim, hidden_dim),  # [13, 100]
+            nn.Linear(self.embedding_dim, hidden_dim),  # [13, 100]
         ]
         for _ in range(n_hidden):
             layers.append(nn.LeakyReLU(inplace=True))
@@ -116,12 +119,12 @@ class LR_HyperNet(nn.Module):
     def forward(self, context_vec, idx):
         emd = self.embeddings(idx)
 
-        context_vec = context_vec.view(1,self.vector_size) #[1,13]
-        hnet_vector = context_vec.expand(len(context_vec), self.embedding_dim)
-        hnet_vector = torch.cat((emd, hnet_vector), dim = 1)
+        #context_vec = context_vec.view(1,self.vector_size) #[1,13]
+        # hnet_vector = context_vec.expand(len(context_vec), self.embedding_dim)
+        # hnet_vector = torch.cat((emd, hnet_vector), dim = 1)
 
         # Generate the weight output features by passing the context_vector through the hypernetwork mlp
-        features = self.mlp(hnet_vector)
+        features = self.mlp(emd)
 
         weights = OrderedDict({
             "fc1.weight": self.fc1_weights(features).view(1,2*self.vector_size),
@@ -273,8 +276,11 @@ class NN_HyperNet(nn.Module):
 
         n_hidden = num_hidden
 
+        # layers = [
+        #     nn.Linear(self.vector_size + self.embedding_dim, hidden_dim),  # [13, 100]
+        # ]
         layers = [
-            nn.Linear(self.vector_size + self.embedding_dim, hidden_dim),  # [13, 100]
+            nn.Linear(self.embedding_dim, hidden_dim),  # [13, 100]
         ]
         for _ in range(n_hidden):
             layers.append(nn.LeakyReLU(inplace=True))
@@ -299,11 +305,11 @@ class NN_HyperNet(nn.Module):
         emd = self.embeddings(idx)
 
         context_vec = context_vec.view(1, self.vector_size)  # [1,13]
-        hnet_vector = context_vec.expand(len(context_vec), self.embedding_dim)
-        hnet_vector = torch.cat((emd, hnet_vector), dim=1)
+        # hnet_vector = context_vec.expand(len(context_vec), self.embedding_dim)
+        # hnet_vector = torch.cat((emd, hnet_vector), dim=1)
 
         # Generate the weight output features by passing the context_vector through the hypernetwork mlp
-        features = self.mlp(hnet_vector)
+        features = self.mlp(emd)
 
         weights = OrderedDict({
             "fc1.weight": self.fc1_weights(features).view(10, 20),

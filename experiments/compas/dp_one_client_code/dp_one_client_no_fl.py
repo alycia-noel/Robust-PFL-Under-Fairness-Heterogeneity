@@ -37,7 +37,7 @@ for i in range(10):
         lr = .0005                # for dp
         #lr = .0003 #.001         # for eo
         wd = 0
-        alpha = 9.5         # for dp
+        alpha = 100#9.5         # for dp
         #alpha = 5          #for eo
         eps = 150
     elif m == "neural-net":
@@ -45,7 +45,7 @@ for i in range(10):
         lr = .0008   # for dp
         #lr = .0005
         wd = .0000001
-        alpha = 28.5     # for dp
+        alpha = 50#28.5     # for dp
         #alpha = 15
         eps = 100
     elif m == "log-reg-c":

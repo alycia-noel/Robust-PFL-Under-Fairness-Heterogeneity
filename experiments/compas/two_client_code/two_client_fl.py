@@ -35,8 +35,8 @@ all_EOD_2, all_SPD_2, all_AOD_2 = [], [], []
 all_times_2, all_roc_2 = [], []
 
 clients = 2
-m = "neural-net-two-fl"
-for i in range(10):
+m = "log-reg-two-fl"
+for i in range(1):
     print('Round:', i)
     seed_everything(0)
     data_train_1, data_test_1, data_train_2, data_test_2, features_1, features_2, decision_1, decision_2, d_test_1, d_test_2, encoders = get_data()

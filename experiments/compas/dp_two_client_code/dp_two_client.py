@@ -9,11 +9,11 @@ from torch.utils.data import DataLoader
 from collections import OrderedDict
 from utils import seed_everything, plot_roc_curves, get_data, confusion_matrix, metrics
 from models import LR_combo, NN_combo, LR_HyperNet, NN_HyperNet
-from fairtorch import DemographicParityLoss
+from fairtorch import DemographicParityLoss, EqualiedOddsLoss
 torch.autograd.set_detect_anomaly(True)
 warnings.filterwarnings("ignore")
 
-m = "log-reg-two-fl"
+m = "neural-net-two-fl"
 
 no_cuda = False
 gpus = '4'
@@ -47,9 +47,8 @@ alphas = [1, 5, 10, 25, 50, 75, 100]
 alpha_results_1 = []
 alpha_results_2 = []
 
-for i, alpha in enumerate(alphas):
+for i in range(1):
     seed_everything(0)
-    print('Round: ', i)
     if m == "log-reg-two-fl":
         c1_model = LR_combo(input_size=9, vector_size=9, hidden_size=100)
         c2_model = LR_combo(input_size=9, vector_size=9, hidden_size=100)
@@ -64,9 +63,9 @@ for i, alpha in enumerate(alphas):
         c1_model = NN_combo(input_size=9, vector_size=9, hidden_size = 100)
         c2_model = NN_combo(input_size=9, vector_size=9, hidden_size = 100)
         hnet = NN_HyperNet(vector_size=9, hidden_dim=100, num_hidden=4)
-        c1_l = .009 #.008
-        c2_l = .002 #.005
-        o_l = .0005 #.0005
+        c1_l = .0005 #.008
+        c2_l = .001 #.005
+        o_l = .001 #.0005
         step = 5
         ep = 50
         wd = 0.0000001
@@ -123,8 +122,12 @@ for i, alpha in enumerate(alphas):
     steps = step
     epochs = ep
 
+    test_acc_1 = []
+    test_acc_2 = []
+
     torch.cuda.synchronize()
     for step in range(steps):
+        print('Round:', step)
         # Need to save model so client both have the same starting point
         torch.save(hnet.state_dict(), 'hnet_baseline_weights.pth')
 
@@ -132,14 +135,18 @@ for i, alpha in enumerate(alphas):
             if c == 0:
                 data_train = data_train_1
                 data_test = data_test_1
-                dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=alpha) #40
+                #dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=100) #40
+                eo_loss = EqualiedOddsLoss(sensitive_classes=[0,1], alpha=16.5) #18
             else:
                 data_train = data_train_2
                 data_test = data_test_2
-                dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=alpha) #5
+                #dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=1) #5
+                eo_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=.25) #.5
 
             train_loader = DataLoader(data_train, shuffle=True, batch_size=256)
             test_loader = DataLoader(data_test, shuffle=False, batch_size=256)
+
+
 
             # load baseline
             hnet.load_state_dict(torch.load('hnet_baseline_weights.pth'))
@@ -147,6 +154,8 @@ for i, alpha in enumerate(alphas):
             hnet.train()
             start_epoch = time.time()
 
+            running_dp_loss = []
+            count = 0
             for epoch in range(epochs):
                 if c == 0:
                     model = c1_model
@@ -158,6 +167,7 @@ for i, alpha in enumerate(alphas):
                 model.train()
                 running_loss = 0.0
                 correct = 0
+                dp_loss_all = 0
 
                 for i, (x, y, s) in enumerate(train_loader):
                     if epoch == 0 and i == 0:
@@ -175,7 +185,15 @@ for i, alpha in enumerate(alphas):
                     optimizer.zero_grad()
 
                     y_, y_raw = model(x.to(device), context_only=False)
-                    err = loss(y_raw.flatten(), y.to(device)) + dp_loss(x.float(), y_raw.float(), s.float())
+                    #dp =  dp_loss(x.float(), y_raw.float(), s.float())
+                    # dp_loss_all += dp.item()
+                    eo = eo_loss(x.float(), y_raw.float(), s.float(), y.float())
+                    #print(eo.item())
+                    if np.isnan(eo.item()):
+                        err = loss(y_raw.flatten(), y.to(device))
+                        #print(count + 1)
+                    else:
+                        err = loss(y_raw.flatten(), y.to(device))+ eo_loss(x.float(), y_raw.float(), s.float(), y.float())
                     err = err.mean()
 
                     running_loss += err.item() * x.size(0)
@@ -186,6 +204,8 @@ for i, alpha in enumerate(alphas):
                     correct += (preds.eq(y)).sum().item()
 
                 accuracy = (100 * correct / len(data_train))
+
+                running_dp_loss.append(dp_loss_all / len(train_loader))
 
                 if c == 0:
                     c1_acc_values.append(accuracy)
@@ -348,6 +368,8 @@ for i, alpha in enumerate(alphas):
             optimizer.zero_grad()
             final_state = model.state_dict()
 
+            # mean_dp_loss = np.mean(running_dp_loss)
+            # print(mean_dp_loss)
             # calculating delta theta
             if c == 0:
                 delta_theta_1 = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
@@ -359,6 +381,22 @@ for i, alpha in enumerate(alphas):
                 hnet_grads_2 = torch.autograd.grad(
                     list(weights.values()), hnet.parameters(), grad_outputs=list(delta_theta_2.values())
                 )
+
+            # if c == 0:
+            #     delta_theta_1 = OrderedDict({k: inner_state[k] - final_state[k] + mean_dp_loss for k in weights.keys()})
+            #     hnet_grads_1 = torch.autograd.grad(
+            #         list(weights.values()), hnet.parameters(), grad_outputs=list(delta_theta_1.values())
+            #     )
+            # elif c == 1:
+            #     delta_theta_2 = OrderedDict({k: inner_state[k] - final_state[k] + mean_dp_loss for k in weights.keys()})
+            #     hnet_grads_2 = torch.autograd.grad(
+            #         list(weights.values()), hnet.parameters(), grad_outputs=list(delta_theta_2.values())
+            #     )
+
+            # if c == 0:
+            #     test_acc_1.append(c1_test_acc[len(c1_test_acc) - 1])
+            # elif c == 1:
+            #     test_acc_2.append(c2_test_acc[len(c2_test_acc) - 1])
 
         hnet.load_state_dict(torch.load('hnet_baseline_weights.pth'))
 
@@ -373,7 +411,7 @@ for i, alpha in enumerate(alphas):
         # torch.nn.utils.clip_grad_norm_(hnet.parameters(), 50)
         optimizer.step()
 
-    alpha_results_1.append(c1_loss_values)
+    alpha_results_1.append(test_acc_1)
     all_acc_1.append(c1_test_acc[len(c1_test_acc) - 1])
     all_f_acc_1.append(c1_f_acc[len(c1_f_acc) - 1])
     all_m_acc_1.append(c1_m_acc[len(c1_m_acc) - 1])
@@ -408,7 +446,7 @@ for i, alpha in enumerate(alphas):
 
     all_roc_1.append(plot_roc_curves(c1_final_final_results, 'prediction', 'two_year_recid', size=(7, 5), fname='./results/roc.png'))
 
-    alpha_results_2.append(c2_loss_values)
+    alpha_results_2.append(test_acc_2)
     all_acc_2.append(c2_test_acc[len(c2_test_acc) - 1])
     all_f_acc_2.append(c2_f_acc[len(c2_f_acc) - 1])
     all_m_acc_2.append(c2_m_acc[len(c2_m_acc) - 1])
@@ -451,33 +489,33 @@ for i, alpha in enumerate(alphas):
     #     f.close()
 
 
-plt.plot(alpha_results_1[0], label='a = 1')
-plt.plot(alpha_results_1[1], label='a = 5')
-plt.plot(alpha_results_1[2], label='a = 10')
-plt.plot(alpha_results_1[3], label='a = 25')
-plt.plot(alpha_results_1[4], label='a = 50')
-plt.plot(alpha_results_1[5], label='a = 75')
-plt.plot(alpha_results_1[6], label='a = 100')
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-title_loss = 'Loss per Epochs for LR-FHN COMPAS using Fairness Weight a - Client ' + str(1)
-plt.title(title_loss)
-plt.legend(loc="upper right")
-plt.show()
-
-plt.plot(alpha_results_2[0], label='a = 1')
-plt.plot(alpha_results_2[1], label='a = 5')
-plt.plot(alpha_results_2[2], label='a = 10')
-plt.plot(alpha_results_2[3], label='a = 25')
-plt.plot(alpha_results_2[4], label='a = 50')
-plt.plot(alpha_results_2[5], label='a = 75')
-plt.plot(alpha_results_2[6], label='a = 100')
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-title_loss = 'Loss per Epochs for LR-FHN COMPAS using Fairness Weight a - Client ' + str(2)
-plt.title(title_loss)
-plt.legend(loc="upper right")
-plt.show()
+# plt.plot(alpha_results_1[0], label='a = 1')
+# plt.plot(alpha_results_1[1], label='a = 5')
+# plt.plot(alpha_results_1[2], label='a = 10')
+# plt.plot(alpha_results_1[3], label='a = 25')
+# plt.plot(alpha_results_1[4], label='a = 50')
+# plt.plot(alpha_results_1[5], label='a = 75')
+# plt.plot(alpha_results_1[6], label='a = 100')
+# plt.xlabel('Round')
+# plt.ylabel('Accuracy')
+# title_loss = 'Accuracy per Round for LR-FHN COMPAS \n using Fairness Weight a - Client ' + str(1)
+# plt.title(title_loss)
+# plt.legend(loc="upper right")
+# plt.show()
+#
+# plt.plot(alpha_results_2[0], label='a = 1')
+# plt.plot(alpha_results_2[1], label='a = 5')
+# plt.plot(alpha_results_2[2], label='a = 10')
+# plt.plot(alpha_results_2[3], label='a = 25')
+# plt.plot(alpha_results_2[4], label='a = 50')
+# plt.plot(alpha_results_2[5], label='a = 75')
+# plt.plot(alpha_results_2[6], label='a = 100')
+# plt.xlabel('Round')
+# plt.ylabel('Accuracy')
+# title_loss = 'Accuracy per Round for LR-FHN COMPAS \n using Fairness Weight a - Client ' + str(2)
+# plt.title(title_loss)
+# plt.legend(loc="upper right")
+# plt.show()
 
 print('Client One')
 print('*******************')
