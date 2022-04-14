@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 warnings.filterwarnings("ignore")
 
-m = "neural-net-c-two"
+m = "neural-net-two"
 
 no_cuda=False
 gpus='5'
@@ -35,7 +35,7 @@ all_times_2, all_roc_2 = [], []
 
 clients = 2
 
-for i in range(10):
+for i in range(1):
     print('Round: ', i)
 
     seed_everything(0)
@@ -45,16 +45,16 @@ for i in range(10):
 
         if m == "log-reg-two":
             model = LR(input_size=10)
-            l_1 = .007#7e-3
-            l_2 = 7e-3
-            ep_1 = 150
+            l_1 = .003#7e-3
+            l_2 = .003
+            ep_1 = 100
             ep_2 = 100
         elif m == "neural-net-two":
             model = NN(input_size=10)
-            l_1 = .0015
-            l_2 = 1e-3
-            ep_1 = 100
-            ep_2 = 100
+            l_1 = .007
+            l_2 = .002
+            ep_1 = 5*50
+            ep_2 = 5*50
         elif m == "log-reg-c-two":
             model = LR_context(input_size=10, vector_size=10)
             l_1 = .0001
@@ -87,8 +87,8 @@ for i in range(10):
 
         optimizer = torch.optim.Adam(model.parameters(), lr=l)
 
-        train_loader = DataLoader(data_train, shuffle = True, batch_size = 128)
-        test_loader = DataLoader(data_test, shuffle = False, batch_size= 128)
+        train_loader = DataLoader(data_train, shuffle = True, batch_size = 256)
+        test_loader = DataLoader(data_test, shuffle = False, batch_size= 256)
 
         results = []
         loss_values = []

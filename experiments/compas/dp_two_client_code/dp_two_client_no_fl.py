@@ -39,33 +39,29 @@ all_times_2, all_roc_2 = [], []
 
 clients = 2
 
-for i in range(10):
+for i in range(1):
     print('Round: ', i)
 
     for c in range(clients):
         seed_everything(0)
         if m == "log-reg-two-dp":
             model = LR(input_size=9)
-            l_1 = 8e-4        # Top two are for DP
-            l_2 = 7e-3
-            #l_1 = 8e-4          # Bottom two are for EO
-            #l_2 = 7e-5
+            l_1 = .003       # Top two are for DP
+            l_2 = .003
             wd = 0
-            alpha_1 = 100#70       # Top two are for DP
-            alpha_2 = 100#2
-            #alpha_1 = 1
-            #alpha_2 = 0
-            eps_1 = 100
-            eps_2 = 90
+            alpha_1 = 45
+            alpha_2 = 5
+            eps_1 = 125
+            eps_2 = 125
         elif m == "neural-net-two-dp":
             model = NN(input_size=9)
-            l_1 = .0001
-            l_2 = .0001
+            l_1 = .007
+            l_2 = .002
             wd = .0000001
-            alpha_1 = 100
-            alpha_2 = 100#1
-            eps_1 = 100
-            eps_2 = 100
+            alpha_1 = 11
+            alpha_2 =.25
+            eps_1 = 5*50
+            eps_2 = 5*50
         elif m == "log-reg-c-two-dp":
             model = LR_context(input_size=9, vector_size=9)
             l = 5.e-4
@@ -97,8 +93,8 @@ for i in range(10):
 
         optimizer = torch.optim.Adam(model.parameters(), lr=l)
         loss = nn.BCEWithLogitsLoss(reduction='mean')
-        dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=alpha)
-        #eo_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=alpha)
+        #dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=alpha)
+        eo_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=alpha)
 
         #train_loader = DataLoader(data_train, shuffle = True, batch_size = 128)
         #test_loader = DataLoader(data_test, shuffle = True, batch_size= 128) #set shuffle to true only for neural net
@@ -130,8 +126,14 @@ for i in range(10):
             for i, (x, y, s) in enumerate(train_loader):
                 optimizer.zero_grad()
                 y_, y_raw = model(x.to(device))
-                err = loss(y_raw.flatten(), y) + dp_loss(x.float(), y_raw.float(), s.float()).cpu()
-                #err = loss(y_raw.flatten(), y) + eo_loss(x.float(), y_raw.float(), s.float(), y.float()).cpu()
+                #fair =  dp_loss(x.float(), y_raw.float(), s.float()).cpu()
+
+                fair = eo_loss(x.float(), y_raw.float(), s.float(), y.float())
+                if np.isnan(fair.item()):
+                   err = loss(y_raw.flatten(), y.to(device))
+                else:
+                   err = loss(y_raw.flatten(), y.to(device)) + fair
+                #err = loss(y_raw.flatten(), y.to(device)) + fair
                 err = err.mean()
                 running_loss += err.item() * x.size(0)
                 err.backward()

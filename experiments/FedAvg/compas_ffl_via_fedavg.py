@@ -122,18 +122,18 @@ def send_main_model_to_nodes_and_update_model_dict(main_model, model_dict, numbe
             model_dict[name_of_models[i]].fc1.weight.data = main_model.fc1.weight.data.clone()
             model_dict[name_of_models[i]].fc1.bias.data = main_model.fc1.bias.data.clone()
 
-            model_dict[name_of_models[i]].fc2.weight.data = main_model.fc2.weight.data.clone()
-            model_dict[name_of_models[i]].fc2.bias.data = main_model.fc2.bias.data.clone()
+            # model_dict[name_of_models[i]].fc2.weight.data = main_model.fc2.weight.data.clone()
+            # model_dict[name_of_models[i]].fc2.bias.data = main_model.fc2.bias.data.clone()
+            #
+            # model_dict[name_of_models[i]].fc3.weight.data = main_model.fc3.weight.data.clone()
+            # model_dict[name_of_models[i]].fc3.bias.data = main_model.fc3.bias.data.clone()
+            #
+            # model_dict[name_of_models[i]].fc4.weight.data = main_model.fc4.weight.data.clone()
+            # model_dict[name_of_models[i]].fc4.bias.data = main_model.fc4.bias.data.clone()
+            #
+            # model_dict[name_of_models[i]].fc5.weight.data = main_model.fc5.weight.data.clone()
+            # model_dict[name_of_models[i]].fc5.bias.data = main_model.fc5.bias.data.clone()
 
-            model_dict[name_of_models[i]].fc3.weight.data = main_model.fc3.weight.data.clone()
-            model_dict[name_of_models[i]].fc3.bias.data = main_model.fc3.bias.data.clone()
-
-            model_dict[name_of_models[i]].fc4.weight.data = main_model.fc4.weight.data.clone()
-            model_dict[name_of_models[i]].fc4.bias.data = main_model.fc4.bias.data.clone()
-
-            model_dict[name_of_models[i]].fc5.weight.data = main_model.fc5.weight.data.clone()
-            model_dict[name_of_models[i]].fc5.bias.data = main_model.fc5.bias.data.clone()
-            
         return model_dict
 
 def create_model_optimizer_criterion_dict(number_of_samples):
@@ -142,6 +142,10 @@ def create_model_optimizer_criterion_dict(number_of_samples):
     criterion_dict = dict()
 
     for i in range(number_of_samples):
+        # if i == 0:
+        #     learning_rate = .007
+        # elif i == 1:
+        #     learning_rate = .002
         model_name = "model" + str(i)
         if m == "log-reg":
             model_info = LR(input_size=10)
@@ -320,72 +324,72 @@ def get_averaged_weights(model_dict, number_of_samples):
     fc1_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc1.weight.shape)
     fc1_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc1.bias.shape)
 
-    fc2_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc2.weight.shape)
-    fc2_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc2.bias.shape)
-
-    fc3_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc3.weight.shape)
-    fc3_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc3.bias.shape)
-
-    fc4_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc4.weight.shape)
-    fc4_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc4.bias.shape)
-
-    fc5_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc5.weight.shape)
-    fc5_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc5.bias.shape)
+    # fc2_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc2.weight.shape)
+    # fc2_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc2.bias.shape)
+    #
+    # fc3_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc3.weight.shape)
+    # fc3_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc3.bias.shape)
+    #
+    # fc4_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc4.weight.shape)
+    # fc4_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc4.bias.shape)
+    #
+    # fc5_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc5.weight.shape)
+    # fc5_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc5.bias.shape)
 
     with torch.no_grad():
         for i in range(number_of_samples):
             fc1_mean_weight += model_dict[name_of_models[i]].fc1.weight.data.clone()
             fc1_mean_bias += model_dict[name_of_models[i]].fc1.bias.data.clone()
 
-            fc2_mean_weight += model_dict[name_of_models[i]].fc2.weight.data.clone()
-            fc2_mean_bias += model_dict[name_of_models[i]].fc2.bias.data.clone()
-
-            fc3_mean_weight += model_dict[name_of_models[i]].fc3.weight.data.clone()
-            fc3_mean_bias += model_dict[name_of_models[i]].fc3.bias.data.clone()
-
-            fc4_mean_weight += model_dict[name_of_models[i]].fc4.weight.data.clone()
-            fc4_mean_bias += model_dict[name_of_models[i]].fc4.bias.data.clone()
-
-            fc5_mean_weight += model_dict[name_of_models[i]].fc5.weight.data.clone()
-            fc5_mean_bias += model_dict[name_of_models[i]].fc5.bias.data.clone()
+            # fc2_mean_weight += model_dict[name_of_models[i]].fc2.weight.data.clone()
+            # fc2_mean_bias += model_dict[name_of_models[i]].fc2.bias.data.clone()
+            #
+            # fc3_mean_weight += model_dict[name_of_models[i]].fc3.weight.data.clone()
+            # fc3_mean_bias += model_dict[name_of_models[i]].fc3.bias.data.clone()
+            #
+            # fc4_mean_weight += model_dict[name_of_models[i]].fc4.weight.data.clone()
+            # fc4_mean_bias += model_dict[name_of_models[i]].fc4.bias.data.clone()
+            #
+            # fc5_mean_weight += model_dict[name_of_models[i]].fc5.weight.data.clone()
+            # fc5_mean_bias += model_dict[name_of_models[i]].fc5.bias.data.clone()
 
         fc1_mean_weight = fc1_mean_weight / number_of_samples
         fc1_mean_bias = fc1_mean_bias / number_of_samples
+        #
+        # fc2_mean_weight = fc2_mean_weight / number_of_samples
+        # fc2_mean_bias = fc2_mean_bias / number_of_samples
+        #
+        # fc3_mean_weight = fc3_mean_weight / number_of_samples
+        # fc3_mean_bias = fc3_mean_bias / number_of_samples
+        #
+        # fc4_mean_weight = fc4_mean_weight / number_of_samples
+        # fc4_mean_bias = fc4_mean_bias / number_of_samples
+        #
+        # fc5_mean_weight = fc5_mean_weight / number_of_samples
+        # fc5_mean_bias = fc5_mean_bias / number_of_samples
 
-        fc2_mean_weight = fc2_mean_weight / number_of_samples
-        fc2_mean_bias = fc2_mean_bias / number_of_samples
-
-        fc3_mean_weight = fc3_mean_weight / number_of_samples
-        fc3_mean_bias = fc3_mean_bias / number_of_samples
-
-        fc4_mean_weight = fc4_mean_weight / number_of_samples
-        fc4_mean_bias = fc4_mean_bias / number_of_samples
-
-        fc5_mean_weight = fc5_mean_weight / number_of_samples
-        fc5_mean_bias = fc5_mean_bias / number_of_samples
-
-    return fc1_mean_weight, fc1_mean_bias, fc2_mean_weight, fc2_mean_bias, fc3_mean_weight, fc3_mean_bias, fc4_mean_weight, fc4_mean_bias, fc5_mean_weight, fc5_mean_bias
+    return fc1_mean_weight, fc1_mean_bias#, fc2_mean_weight, fc2_mean_bias, fc3_mean_weight, fc3_mean_bias, fc4_mean_weight, fc4_mean_bias, fc5_mean_weight, fc5_mean_bias
 
 
 def set_averaged_weights_as_main_model_weights_and_update_main_model(main_model,model_dict, number_of_samples):
-    fc1_mean_weight, fc1_mean_bias, fc2_mean_weight, fc2_mean_bias, fc3_mean_weight, fc3_mean_bias, fc4_mean_weight, fc4_mean_bias, fc5_mean_weight, fc5_mean_bias = get_averaged_weights(model_dict, number_of_samples=number_of_samples)
-    #fc1_mean_weight, fc1_mean_bias = get_averaged_weights(model_dict, number_of_samples=number_of_samples)
+    #fc1_mean_weight, fc1_mean_bias, fc2_mean_weight, fc2_mean_bias, fc3_mean_weight, fc3_mean_bias, fc4_mean_weight, fc4_mean_bias, fc5_mean_weight, fc5_mean_bias = get_averaged_weights(model_dict, number_of_samples=number_of_samples)
+    fc1_mean_weight, fc1_mean_bias = get_averaged_weights(model_dict, number_of_samples=number_of_samples)
 
     with torch.no_grad():
         main_model.fc1.weight.data = fc1_mean_weight.data.clone()
         main_model.fc1.bias.data = fc1_mean_bias.data.clone()
 
-        main_model.fc2.weight.data = fc2_mean_weight.data.clone()
-        main_model.fc2.bias.data = fc2_mean_bias.data.clone()
-
-        main_model.fc3.weight.data = fc3_mean_weight.data.clone()
-        main_model.fc3.bias.data = fc3_mean_bias.data.clone()
-
-        main_model.fc4.weight.data = fc4_mean_weight.data.clone()
-        main_model.fc4.bias.data = fc4_mean_bias.data.clone()
-
-        main_model.fc5.weight.data = fc5_mean_weight.data.clone()
-        main_model.fc5.bias.data = fc5_mean_bias.data.clone()
+        # main_model.fc2.weight.data = fc2_mean_weight.data.clone()
+        # main_model.fc2.bias.data = fc2_mean_bias.data.clone()
+        #
+        # main_model.fc3.weight.data = fc3_mean_weight.data.clone()
+        # main_model.fc3.bias.data = fc3_mean_bias.data.clone()
+        #
+        # main_model.fc4.weight.data = fc4_mean_weight.data.clone()
+        # main_model.fc4.bias.data = fc4_mean_bias.data.clone()
+        #
+        # main_model.fc5.weight.data = fc5_mean_weight.data.clone()
+        # main_model.fc5.bias.data = fc5_mean_bias.data.clone()
 
     return main_model
 
@@ -420,21 +424,21 @@ times_all, roc_all = [], []
 number_of_samples = 2 #i.e. number of clients
 batch_size = 256
 print_amount = 5
-m = "neural-net"
+m = "log-reg"
 if m == "log-reg":
     main_model = LR(input_size = 10)
-    learning_rate = 5e-4#1e-2
-    learning_rate_global = 5e-4#1e-4
-    num_epoch = 10          # local
+    learning_rate = .003#5e-4#1e-2
+    #learning_rate_global = 5e-4#1e-4
+    num_epoch = 20#10          # local
     wd = 0
 elif m == "neural-net":
     main_model = NN(input_size = 10)
-    learning_rate = 1e-3
-    num_epoch = 25#10         # local
-    learning_rate_global = 1e-3
+    learning_rate = .01#1e-3
+    num_epoch = 50#10         # local
+    #learning_rate_global = .1#1e-3
     wd = 0.0000001
 
-main_optimizer = torch.optim.Adam(main_model.parameters(), lr=learning_rate_global, weight_decay=wd)
+#main_optimizer = torch.optim.Adam(main_model.parameters(), lr=learning_rate_global, weight_decay=wd)
 loss = nn.BCEWithLogitsLoss(reduction='mean')
 main_criterion = nn.BCEWithLogitsLoss()
 
@@ -451,7 +455,7 @@ print('~~~ Start Training ~~~')
 print('~'*22,'\n')
 results_main_model = []
 
-for i in range(10):
+for i in range(5):
     model_dict = send_main_model_to_nodes_and_update_model_dict(main_model, model_dict, number_of_samples)
     start_train_end_node_process_print_some(number_of_samples, print_amount)
     start = time.time()

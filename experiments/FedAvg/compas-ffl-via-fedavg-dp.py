@@ -6,26 +6,35 @@ from torch.utils.data import DataLoader
 import torch.nn as nn
 from utils import seed_everything, plot_roc_curves, get_data_dp, confusion_matrix_dp, metrics
 from models import LR, NN
-from fairtorch import DemographicParityLoss
+from fairtorch import DemographicParityLoss, EqualiedOddsLoss
 warnings.filterwarnings("ignore")
 import matplotlib.pyplot as plt
+import numpy as np
 
 no_cuda = False
 gpus = '5'
 device = torch.cuda.set_device(5)
 
 def train_dp(model, train_loader, loss, optimizer, alpha):
+    fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=alpha)
+    # if alpha == 40:
+    #     fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=alpha)
+    # elif alpha == .25:
+    #     fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=alpha)
     model.train()
     model = model.to(device)
     correct = 0
     running_loss = 0.0
 
-    dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=alpha)
-
     for i, (x, y, s) in enumerate(train_loader):
         optimizer.zero_grad()
         y_, y_raw = model(x.to(device))
-        err = loss(y_raw.flatten(), y.to(device)) + dp_loss(x.float(), y_raw.float(), s.float()).cpu()
+        #fair = eo_loss(x.float(), y_raw.float(), s.float(), y.float())
+        fair = fair_loss(x.float(), y_raw.float(), s.float(), y.float())
+        if np.isnan(fair.item()):
+            err = loss(y_raw.flatten(), y.to(device))
+        else:
+            err = loss(y_raw.flatten(), y.to(device)) + fair
         err = err.mean()
         running_loss += err.item() * x.size(0)
         err.backward()
@@ -118,6 +127,11 @@ def create_model_optimizer_criterion_dict(number_of_samples):
         elif m == "neural-net":
             model_info = NN(input_size=9)
 
+        if i == 0:
+            learning_rate = .007
+        elif i == 1:
+            learning_rate = .002
+
         model_dict.update({model_name: model_info})
 
         optimizer_name = "optimizer" + str(i)
@@ -152,11 +166,11 @@ def start_train_end_node_process_print_some(number_of_samples, print_amount, alp
         if i == 0:
             data_train = data_train_1
             data_test = data_test_1
-            alpha = 50
+            #alpha = 40
         if i == 1:
             data_train = data_train_2
             data_test = data_test_2
-            alpha = 5
+            #alpha = .25
 
         train_dl = DataLoader(data_train, shuffle=True, batch_size=256)
         test_dl = DataLoader(data_test, shuffle=False, batch_size=256)
@@ -402,25 +416,25 @@ EOD_all, SPD_all, AOD_all = [], [], []
 times_all, roc_all = [], []
 
 number_of_samples = 2  # i.e. number of clients
-batch_size = 128
+batch_size = 256
 print_amount = 0
 m = "neural-net"
-for i in range(10):
+for i in range(1):
     seed_everything(0)
     if m == "log-reg":
         main_model = LR(input_size=9)
-        learning_rate = 7e-3
-        learning_rate_global = 5e-4
-        num_epoch = 10  # local
+        learning_rate = .003
+        #learning_rate_global = 5e-4
+        num_epoch = 25  # local
         wd = 0
     if m == "neural-net":
         main_model = NN(input_size=9)
-        learning_rate = 1e-3
-        num_epoch = 25  # local
-        learning_rate_global = 1e-3
+        learning_rate = .003
+        num_epoch = 50  # local
+        #learning_rate_global = 1e-3
         wd = 0.0000001
 
-    main_optimizer = torch.optim.Adam(main_model.parameters(), lr=learning_rate_global, weight_decay=wd)
+    #main_optimizer = torch.optim.Adam(main_model.parameters(), lr=learning_rate_global, weight_decay=wd)
     loss = nn.BCEWithLogitsLoss(reduction='mean')
     main_criterion = nn.BCEWithLogitsLoss()
 
@@ -443,7 +457,7 @@ for i in range(10):
     #alphas = [1, 5, 10, 25, 50, 75, 100]
 
     #l_1, l_2 = [], []
-    for i in range(10):
+    for i in range(5):
         model_dict = send_main_model_to_nodes_and_update_model_dict(main_model, model_dict, number_of_samples)
         loss_1, loss_2 = start_train_end_node_process_print_some(number_of_samples, print_amount, alpha=100)
 

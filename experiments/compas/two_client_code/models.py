@@ -304,13 +304,12 @@ class NN_HyperNet(nn.Module):
     def forward(self, context_vec, idx):
         emd = self.embeddings(idx)
 
-        context_vec = context_vec.view(1, self.vector_size)  # [1,13]
+        #context_vec = context_vec.view(1, self.vector_size)  # [1,13]
         # hnet_vector = context_vec.expand(len(context_vec), self.embedding_dim)
         # hnet_vector = torch.cat((emd, hnet_vector), dim=1)
 
         # Generate the weight output features by passing the context_vector through the hypernetwork mlp
         features = self.mlp(emd)
-
         weights = OrderedDict({
             "fc1.weight": self.fc1_weights(features).view(10, 20),
             "fc1.bias": self.fc1_bias(features).view(-1),

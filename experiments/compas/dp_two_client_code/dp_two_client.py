@@ -13,7 +13,7 @@ from fairtorch import DemographicParityLoss, EqualiedOddsLoss
 torch.autograd.set_detect_anomaly(True)
 warnings.filterwarnings("ignore")
 
-m = "neural-net-two-fl"
+m = "log-reg-two-fl"
 
 no_cuda = False
 gpus = '4'
@@ -53,19 +53,19 @@ for i in range(1):
         c1_model = LR_combo(input_size=9, vector_size=9, hidden_size=100)
         c2_model = LR_combo(input_size=9, vector_size=9, hidden_size=100)
         hnet = LR_HyperNet(vector_size=9, hidden_dim=100, num_hidden=3)
-        c1_l = .005
+        c1_l = .003#.005
         c2_l = .003
-        o_l = .001
+        o_l = .003#.001
         step = 5
-        ep = 25
+        ep = 25#25
         wd = 0
     elif m == "neural-net-two-fl":
         c1_model = NN_combo(input_size=9, vector_size=9, hidden_size = 100)
         c2_model = NN_combo(input_size=9, vector_size=9, hidden_size = 100)
         hnet = NN_HyperNet(vector_size=9, hidden_dim=100, num_hidden=4)
-        c1_l = .0005 #.008
-        c2_l = .001 #.005
-        o_l = .001 #.0005
+        c1_l = .007 #.001
+        c2_l = .002 #.001
+        o_l = .0005 #.001
         step = 5
         ep = 50
         wd = 0.0000001
@@ -135,18 +135,16 @@ for i in range(1):
             if c == 0:
                 data_train = data_train_1
                 data_test = data_test_1
-                #dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=100) #40
-                eo_loss = EqualiedOddsLoss(sensitive_classes=[0,1], alpha=16.5) #18
+                #fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=40) #40
+                fair_loss = EqualiedOddsLoss(sensitive_classes=[0,1], alpha=45) #11
             else:
                 data_train = data_train_2
                 data_test = data_test_2
-                #dp_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=1) #5
-                eo_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=.25) #.5
+                fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=2) #5
+                # fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=.25) #.4
 
             train_loader = DataLoader(data_train, shuffle=True, batch_size=256)
             test_loader = DataLoader(data_test, shuffle=False, batch_size=256)
-
-
 
             # load baseline
             hnet.load_state_dict(torch.load('hnet_baseline_weights.pth'))
@@ -185,16 +183,15 @@ for i in range(1):
                     optimizer.zero_grad()
 
                     y_, y_raw = model(x.to(device), context_only=False)
-                    #dp =  dp_loss(x.float(), y_raw.float(), s.float())
-                    # dp_loss_all += dp.item()
-                    eo = eo_loss(x.float(), y_raw.float(), s.float(), y.float())
-                    #print(eo.item())
-                    if np.isnan(eo.item()):
+
+                    fair = fair_loss(x.float(), y_raw.float(), s.float(), y.float())
+
+                    if np.isnan(fair.item()):
                         err = loss(y_raw.flatten(), y.to(device))
                         #print(count + 1)
                     else:
-                        err = loss(y_raw.flatten(), y.to(device))+ eo_loss(x.float(), y_raw.float(), s.float(), y.float())
-                    err = err.mean()
+                        err = loss(y_raw.flatten(), y.to(device))+ fair
+                        err = err.mean()
 
                     running_loss += err.item() * x.size(0)
                     err.backward()
