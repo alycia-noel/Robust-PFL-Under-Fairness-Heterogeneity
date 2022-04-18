@@ -133,23 +133,27 @@ def get_dataset(data_name):
         data_train_2 = TabularData(d_train_2[features].values, d_train_2[decision].values)
         data_test_2 = TabularData(d_test_2[features].values, d_test_2[decision].values)
 
-        data_train = torch.utils.data.ConcatDataset([data_train_1, data_train_2])
+        train_sets = [d_train_1, d_train_2]
+        test_sets = [d_test_1, d_test_2]
 
-        data_test = torch.utils.data.ConcatDataset([data_test_1, data_test_2])
+        d_train_all = pd.concat(train_sets)
+        d_test_all = pd.concat(test_sets)
+        data_train_all = TabularData(d_train_all[features].values, d_train_all[decision].values)
+        data_test_all = TabularData(d_test_all[features].values, d_test_all[decision].values)
 
-        all_data = [data_train, data_test]
+        all_data = [data_train_1, data_train_2, data_test_1, data_test_2]
 
-    return all_data, features
+    return all_data, features, data_train_all, data_test_all
 
-def get_num_classes_samples(dataset):
+def get_num_classes_samples(dataset, dataset_split_point_start, dataset_split_point_end):
     data_labels_list = np.array(dataset.y)
+    data_labels_list = data_labels_list[dataset_split_point_start:dataset_split_point_end]
     classes, num_samples = np.unique(data_labels_list, return_counts=True)
     num_classes = len(classes)
     return num_classes, num_samples, data_labels_list
 
-def gen_classes_per_node(dataset, num_users, classes_per_user, high_prob=0.6, low_prob=0.4):
-    print(dataset)
-    num_classes, num_samples_1, _ = get_num_classes_samples(dataset)
+def gen_classes_per_node(dataset, num_users, classes_per_user, dataset_split_point_start, dataset_split_point_end, high_prob=0.6, low_prob=0.4):
+    num_classes, num_samples, _ = get_num_classes_samples(dataset, dataset_split_point_start, dataset_split_point_end)
 
     assert (classes_per_user * num_users) % num_classes == 0
     count_per_class = (classes_per_user * num_users) // num_classes
@@ -171,9 +175,8 @@ def gen_classes_per_node(dataset, num_users, classes_per_user, high_prob=0.6, lo
         class_partitions['prob'].append([class_dict[i]['prob'].pop() for i in c])
     return class_partitions
 
-def gen_data_split(dataset, num_users, class_partitions):
-    num_classes, num_samples, data_labels_list = get_num_classes_samples(dataset)
-
+def gen_data_split(dataset, num_users, class_partitions, dataset_split_point_start, dataset_split_point_end):
+    num_classes, num_samples, data_labels_list = get_num_classes_samples(dataset,dataset_split_point_start, dataset_split_point_end)
     data_class_idx = {i: np.where(data_labels_list == i)[0] for i in range(num_classes)}
 
     for data_idx in data_class_idx.values():
@@ -185,20 +188,57 @@ def gen_data_split(dataset, num_users, class_partitions):
             end_idx = int(num_samples[c] * p)
             user_data_idx[usr_i].extend(data_class_idx[c][:end_idx])
             data_class_idx[c] = data_class_idx[c][end_idx:]
-
     return user_data_idx
 
 def gen_random_loaders(data_name, num_users, bz, classes_per_user):
     loader_params = {"batch_size": bz, "shuffle": False, "pin_memory": True, "num_workers": 0}
+
+    num_users_1 = random.randint(1, num_users-1)
+    num_users_2 = abs(num_users - num_users_1)
+
     dataloaders = []
-    datasets, features = get_dataset(data_name)
+    subsets_train = []
+    subsets_test = []
+    cls_partitions_1 = []
+    cls_partitions_2 = []
+    datasets, features, all_train, all_test = get_dataset(data_name)
+
     for i, d in enumerate(datasets):
         if i == 0:
-            cls_partitions = gen_classes_per_node(d, num_users, classes_per_user)
+            dataset_split_point_start = 0
+            dataset_split_point_end = len(datasets[0])  # 2864
+            num_users = num_users_1
+            cls_partitions_1 = gen_classes_per_node(all_train, num_users, classes_per_user, dataset_split_point_start, dataset_split_point_end)
             loader_params['shuffle'] = True
-            usr_subset_idx = gen_data_split(d, num_users, cls_partitions)
-        subsets = list(map(lambda x: torch.utils.data.Subset(d, x), usr_subset_idx))
-        dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params), subsets)))
+            user_subset_idx_1 = gen_data_split(all_train, num_users, cls_partitions_1, dataset_split_point_start, dataset_split_point_end)
+            subsets_train = list(map(lambda x: torch.utils.data.Subset(all_train, x), user_subset_idx_1))
+
+        elif i == 1:
+            dataset_split_point_start = len(datasets[0])  # 2864
+            dataset_split_point_end= len(all_train)
+            num_users = num_users_2
+            cls_partitions_2 = gen_classes_per_node(all_train, num_users, classes_per_user, dataset_split_point_start, dataset_split_point_end)
+            loader_params['shuffle'] = True
+            user_subset_idx_2 = gen_data_split(all_train, num_users, cls_partitions_2,dataset_split_point_start, dataset_split_point_end)
+            for j in range(num_users):
+                subsets_train.append(torch.utils.data.Subset(all_train, user_subset_idx_2[j]))
+            dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params), subsets_train)))
+
+        if i == 2:
+            dataset_split_point_start = 0
+            dataset_split_point_end = len(datasets[2])  # 2864
+            user_subset_idx_1 = gen_data_split(all_test, num_users, cls_partitions_1, dataset_split_point_start, dataset_split_point_end)
+            subsets_test = list(map(lambda x: torch.utils.data.Subset(all_test, x), user_subset_idx_1))
+
+        elif i == 3:
+            dataset_split_point_start = len(datasets[2])  # 2864
+            dataset_split_point_end= len(all_test)
+            user_subset_idx_2 = gen_data_split(all_test, num_users, cls_partitions_2,dataset_split_point_start, dataset_split_point_end)
+            for j in range(num_users):
+                subsets_test.append(torch.utils.data.Subset(all_test, user_subset_idx_2[j]))
+            dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params), subsets_test)))
+
+
 
     return dataloaders, features
 

@@ -29,11 +29,15 @@ def eval_model(nodes, num_nodes, hnet, model, loss, device, split, confusion=Fal
     if confusion:
         classes = {'No', 'Yes'}
         for i in range(len(pred)):
-            cf_matrix = confusion_matrix(true[i], pred[i])
-            df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix) * 10, index=[i for i in classes],
-                                 columns=[i for i in classes])
+            actual = pd.Series(true[i], name='Actual')
+            prediction = pd.Series(pred[i], name='Predicted')
+            confusion = pd.crosstab(actual, prediction)
+            #cf_matrix = confusion_matrix(true[i], pred[i]).reshape(2,2)
+            print(confusion)
+            #df_cm = pd.DataFrame(confusion, index=[i for i in classes], columns=[i for i in classes])
+            #/ np.sum(cf_matrix) * 10
             plt.figure(figsize=(12, 7))
-            sn.heatmap(df_cm, annot=True)
+            sn.heatmap(confusion, annot=True)
             title = 'Confusion Matrix for Client ' + str(i + 1)
             plt.title(title)
             plt.show()
@@ -46,19 +50,16 @@ def evaluate(nodes, num_nodes, hnet, model, loss, device, split='test'):
     results = defaultdict(lambda: defaultdict(list))
     preds = []
     true = []
+
     for node_id in range(num_nodes):
         pred_client = []
         true_client = []
         running_loss, running_correct, running_samples = 0, 0, 0
-        if split == 'test':
-            curr_data = nodes.test_loaders[node_id]
-        else:
-            curr_data = nodes.train_loaders[node_id]
+
+        curr_data = nodes.test_loaders[node_id]
 
         for batch_count, batch in enumerate(curr_data):
             x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
-            print(x, y)
-
             true_client.extend(y.cpu().numpy())
 
             avg_context_vector = model(x.to(device), context_only=True)
@@ -83,7 +84,7 @@ def evaluate(nodes, num_nodes, hnet, model, loss, device, split='test'):
         results[node_id]['total'] = running_samples
         preds.append(pred_client)
         true.append(true_client)
-        exit(1)
+
     return results, preds, true
 
 def train(data_name, model_name, classes_per_node, num_nodes, steps, inner_steps, lr, inner_lr, wd, inner_wd, hyper_hid, n_hidden, bs, device, eval_every, seed, fair, save_path):
@@ -106,23 +107,23 @@ def train(data_name, model_name, classes_per_node, num_nodes, steps, inner_steps
         optimizer = torch.optim.Adam(params=hnet.parameters(), lr=lr, weight_decay=wd)
         loss = torch.nn.BCEWithLogitsLoss()
 
-        last_eval = -1
-        best_step = -1
-        best_acc = -1
-        test_best_based_on_step, test_best_min_based_on_step = -1, -1
-        test_best_max_based_on_step, test_best_std_based_on_step = -1, -1
         step_iter = trange(steps)
 
-        results = defaultdict(list)
-        i = 0
+
         for step in step_iter:
+            # sample client
             hnet.train()
             node_id = random.choice(range(num_nodes))
 
             for j in range(inner_steps):
+                # get new batch
                 batch = next(iter(nodes.train_loaders[node_id]))
                 x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
-                print(torch.max(x, dim=0), torch.min(x,  dim=0))
+
+                if torch.min(x, dim=0).values[0] < 31 and torch.max(x, dim=0).values[0] > 31:
+                    print('True:', torch.min(x, dim=0).values[0], torch.max(x, dim=0).values[0])
+
+               # get parameters based on c^i if it is the first local epoch
                 if j == 0:
                     avg_context_vector = model(x, context_only=True)
                     weights = hnet(avg_context_vector, torch.tensor([node_id], dtype=torch.long).to(device))
@@ -133,30 +134,21 @@ def train(data_name, model_name, classes_per_node, num_nodes, steps, inner_steps
 
                     inner_optim = torch.optim.Adam(model.parameters(), lr=inner_lr, weight_decay=inner_wd)
 
+                    # save starting config
                     inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
-
-                    with torch.no_grad():
-                        model.eval()
-                        pred = model(x, context_only = False)
-                        prvs_loss = loss(pred, y.unsqueeze(1))
-                        pred_prob = torch.sigmoid(pred)
-                        pred_thresh = (pred_prob > 0.5).long()
-                        correct = torch.eq(pred_thresh, y.unsqueeze(1)).type(torch.cuda.LongTensor)
-                        prvs_acc = torch.count_nonzero(correct).item() / len(pred)
-                        model.train()
 
                 model.train()
                 inner_optim.zero_grad()
                 optimizer.zero_grad()
 
+                # train and update local
                 pred = model(x, context_only=False)
                 err = loss(pred, y.unsqueeze(1))
                 err.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 50)
                 inner_optim.step()
 
-                i += 1
-
+            # delta theta and global updates
             optimizer.zero_grad()
             final_state = model.state_dict()
             delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
@@ -168,37 +160,16 @@ def train(data_name, model_name, classes_per_node, num_nodes, steps, inner_steps
             torch.nn.utils.clip_grad_norm_(hnet.parameters(), 50)
             optimizer.step()
 
-            step_iter.set_description(f"Step: {step + 1}, Node ID: {node_id}, Loss: {prvs_loss:.4f},  Acc: {prvs_acc:.4f}")
+            step_results, avg_loss, avg_acc, all_acc = eval_model(nodes, num_nodes, hnet, model, loss, device, confusion=False, split="test")
 
-            if step % eval_every == 0:
-                last_eval = step
-                step_results, avg_loss, avg_acc, all_acc = eval_model(nodes, num_nodes, hnet, model, loss, device, confusion=True,
-                                                                      split="test")
+            logging.info(f"\nStep: {step + 1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}")
+            writer.add_scalar('testing accuracy', avg_acc, step)
 
-                logging.info(f"\nStep: {step + 1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}")
-                writer.add_scalar('testing accuracy', avg_acc, step)
-                results['test_avg_loss'].append(avg_loss)
-                results['test_avg_acc'].append(avg_acc)
-
-                # _, val_avg_loss, val_avg_acc, _ = eval_model(nodes, num_nodes, hnet, model, loss, device, split="val")
-                # if best_acc < val_avg_acc:
-                #     best_acc = val_avg_acc
-                #     best_step = step
-                #     test_best_based_on_step = avg_acc
-                #     test_best_min_based_on_step = np.min(all_acc)
-                #     test_best_max_based_on_step = np.max(all_acc)
-                #     test_best_std_based_on_step = np.std(all_acc)
-
-                # results['val_avg_loss'].append(val_avg_loss)
-                # results['val_avg_acc'].append(val_avg_acc)
-                results['best_step'].append(best_step)
-                results['best_val_acc'].append(best_acc)
-                results['best_test_acc_based_on_val_beststep'].append(test_best_based_on_step)
-                results['test_best_min_based_on_step'].append(test_best_min_based_on_step)
-                results['test_best_max_based_on_step'].append(test_best_max_based_on_step)
-                results['test_best_std_based_on_step'].append(test_best_std_based_on_step)
+        step_results, avg_loss, avg_acc, all_acc = eval_model(nodes, num_nodes, hnet, model, loss, device, confusion=True,split="test")
 
 if __name__ == '__main__':
+    pd.set_option('display.float_format', lambda x: '%.1f' % x)
+
     writer = SummaryWriter('results')
 
     parser = argparse.ArgumentParser(description="Fair Hypernetworks")
@@ -229,7 +200,7 @@ if __name__ == '__main__':
 
     device = get_device(gpus=args.gpu)
 
-    args.classes_per_node = 1
+    args.classes_per_node = 2
 
     train(data_name=args.data_name,
           model_name=args.model_name,
