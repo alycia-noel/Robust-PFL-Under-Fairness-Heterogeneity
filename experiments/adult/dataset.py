@@ -10,19 +10,25 @@ import numpy as np
 from collections import defaultdict
 
 class TabularData(Dataset):
-    def __init__(self, X, y):
+    def __init__(self, X, y, s, fair):
         assert len(X) == len(y)
         n, m = X.shape
         self.n = n
         self.m = m
         self.X = torch.tensor(X)
         self.y = torch.tensor(y)
+        self.fair = fair
+        if fair != 'none':
+            self.s = torch.tensor(s, dtype=torch.float64)
 
     def __len__(self):
         return self.n
 
     def __getitem__(self, idx):
-        return self.X[idx], self.y[idx]
+        if self.fair == 'none':
+            return self.X[idx], self.y[idx]
+        else:
+            return self.X[idx], self.y[idx], self.s[idx]
 
 
 def read_dataset(path, data_types, data_name):
@@ -46,7 +52,7 @@ def read_dataset(path, data_types, data_name):
         data = pd.read_csv(url)
     return data
 
-def clean_and_encode_dataset(data, data_name):
+def clean_and_encode_dataset(data, data_name, fair):
     if data_name == 'adult':
         data['income_class'] = data.income_class.str.rstrip('.').astype('category')
 
@@ -74,8 +80,13 @@ def clean_and_encode_dataset(data, data_name):
         data['length_of_stay'] = (
                 pd.to_datetime(data['c_jail_out']) - pd.to_datetime(data['c_jail_in']))
 
-        cols = ['age', 'c_charge_degree', 'race', 'age_cat', 'score_text', 'sex', 'priors_count', 'length_of_stay',
-                'days_b_screening_arrest', 'decile_score', 'two_year_recid']
+        if fair == 'none':
+            cols = ['age', 'c_charge_degree', 'race', 'age_cat', 'score_text', 'sex', 'priors_count', 'length_of_stay',
+                    'days_b_screening_arrest', 'decile_score', 'two_year_recid']
+        else:
+            cols = ['age', 'c_charge_degree', 'race', 'age_cat', 'score_text', 'priors_count', 'length_of_stay',
+                    'days_b_screening_arrest', 'decile_score', 'two_year_recid', 'sex']
+
         data = data[cols]
 
         data['length_of_stay'] /= np.timedelta64(1, 'D')
@@ -85,10 +96,9 @@ def clean_and_encode_dataset(data, data_name):
         for col in ['race', 'sex', 'c_charge_degree', 'score_text', 'age_cat']:
             encoders[col] = LabelEncoder().fit(data[col])
             data.loc[:, col] = encoders[col].transform(data[col])
-
     return data
 
-def get_dataset(data_name):
+def get_dataset(data_name, fair):
     if data_name == 'adult':
 
         CURRENT_DIR = os.path.abspath(os.path.dirname(__name__))
@@ -113,37 +123,59 @@ def get_dataset(data_name):
             ("income_class", "category"),
         ])
 
-        train = clean_and_encode_dataset(read_dataset(TRAIN_DATA_FILE, data_types, 'adult'), 'adult')  #(32561, 14)
-        test = clean_and_encode_dataset(read_dataset(TEST_DATA_FILE, data_types, 'adult'), 'adult')    #(16281, 14)
+        train = clean_and_encode_dataset(read_dataset(TRAIN_DATA_FILE, data_types, 'adult'), 'adult', fair)  #(32561, 14)
+        test = clean_and_encode_dataset(read_dataset(TEST_DATA_FILE, data_types, 'adult'), 'adult', fair)    #(16281, 14)
 
     elif data_name == 'compas':
-        train = clean_and_encode_dataset(read_dataset(None, None, 'compas'), 'compas')
+        train = clean_and_encode_dataset(read_dataset(None, None, 'compas'), 'compas', fair)
         client_1 = train[train['age'] <= 31]  # 3164
 
         client_2 = train[train['age'] > 31]  # 3008
 
         cols = client_1.columns
-        features, decision = cols[:-1], cols[-1]
+        if fair == 'none':
+            features, decision, sensitive = cols[:-1], cols[-1], None
+        else:
+            features, decision, sensitive = cols[:-2], cols[-2], cols[-1]
 
-        d_train_1, d_test_1 = train_test_split(client_1, test_size=300)
-        data_train_1 = TabularData(d_train_1[features].values, d_train_1[decision].values)
-        data_test_1 = TabularData(d_test_1[features].values, d_test_1[decision].values)
+        if fair == 'none':
+            sensitive = None
+            d_train_1, d_test_1 = train_test_split(client_1, test_size=300)
+            data_train_1 = TabularData(d_train_1[features].values, d_train_1[decision].values, None, fair)
+            data_test_1 = TabularData(d_test_1[features].values, d_test_1[decision].values, None, fair)
 
-        d_train_2, d_test_2 = train_test_split(client_2, test_size=300)
-        data_train_2 = TabularData(d_train_2[features].values, d_train_2[decision].values)
-        data_test_2 = TabularData(d_test_2[features].values, d_test_2[decision].values)
+            d_train_2, d_test_2 = train_test_split(client_2, test_size=300)
+            data_train_2 = TabularData(d_train_2[features].values, d_train_2[decision].values, None, fair)
+            data_test_2 = TabularData(d_test_2[features].values, d_test_2[decision].values, None, fair)
 
-        train_sets = [d_train_1, d_train_2]
-        test_sets = [d_test_1, d_test_2]
+            train_sets = [d_train_1, d_train_2]
+            test_sets = [d_test_1, d_test_2]
 
-        d_train_all = pd.concat(train_sets)
-        d_test_all = pd.concat(test_sets)
-        data_train_all = TabularData(d_train_all[features].values, d_train_all[decision].values)
-        data_test_all = TabularData(d_test_all[features].values, d_test_all[decision].values)
+            d_train_all = pd.concat(train_sets)
+            d_test_all = pd.concat(test_sets)
+            data_train_all = TabularData(d_train_all[features].values, d_train_all[decision].values, None, fair)
+            data_test_all = TabularData(d_test_all[features].values, d_test_all[decision].values, None, fair)
+
+        else:
+            d_train_1, d_test_1 = train_test_split(client_1, test_size=300)
+            data_train_1 = TabularData(d_train_1[features].values, d_train_1[decision].values, d_train_1[sensitive].values, fair)
+            data_test_1 = TabularData(d_test_1[features].values, d_test_1[decision].values, d_test_1[sensitive].values, fair)
+
+            d_train_2, d_test_2 = train_test_split(client_2, test_size=300)
+            data_train_2 = TabularData(d_train_2[features].values, d_train_2[decision].values, d_train_2[sensitive].values, fair)
+            data_test_2 = TabularData(d_test_2[features].values, d_test_2[decision].values, d_test_2[sensitive].values, fair)
+
+            train_sets = [d_train_1, d_train_2]
+            test_sets = [d_test_1, d_test_2]
+
+            d_train_all = pd.concat(train_sets)
+            d_test_all = pd.concat(test_sets)
+            data_train_all = TabularData(d_train_all[features].values, d_train_all[decision].values, d_train_all[sensitive].values, fair)
+            data_test_all = TabularData(d_test_all[features].values, d_test_all[decision].values, d_test_all[sensitive].values, fair)
 
         all_data = [data_train_1, data_train_2, data_test_1, data_test_2]
 
-    return all_data, features, data_train_all, data_test_all
+    return all_data, features, data_train_all, data_test_all, sensitive
 
 def get_num_classes_samples(dataset, dataset_split_point_start, dataset_split_point_end):
     data_labels_list = np.array(dataset.y)
@@ -190,7 +222,7 @@ def gen_data_split(dataset, num_users, class_partitions, dataset_split_point_sta
             data_class_idx[c] = data_class_idx[c][end_idx:]
     return user_data_idx
 
-def gen_random_loaders(data_name, num_users, bz, classes_per_user):
+def gen_random_loaders(data_name, num_users, bz, classes_per_user, fair):
     loader_params = {"batch_size": bz, "shuffle": False, "pin_memory": True, "num_workers": 0}
 
     num_users_1 = random.randint(1, num_users-1)
@@ -201,7 +233,7 @@ def gen_random_loaders(data_name, num_users, bz, classes_per_user):
     subsets_test = []
     cls_partitions_1 = []
     cls_partitions_2 = []
-    datasets, features, all_train, all_test = get_dataset(data_name)
+    datasets, features, all_train, all_test, sensitive = get_dataset(data_name, fair)
 
     for i, d in enumerate(datasets):
         if i == 0:
@@ -240,6 +272,6 @@ def gen_random_loaders(data_name, num_users, bz, classes_per_user):
 
 
 
-    return dataloaders, features
+    return dataloaders, features, sensitive
 
 
