@@ -1,4 +1,4 @@
-from experiments.adult.dataset import gen_random_loaders
+from experiments.new.dataset import gen_random_loaders
 
 class BaseNodes:
     def __init__(self, data_name, n_nodes, batch_size, classes_per_node, fair):

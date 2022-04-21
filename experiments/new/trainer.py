@@ -9,9 +9,9 @@ import torch
 import pandas as pd
 import torch.utils.data
 from tqdm import trange
-from experiments.adult.models import NN_Context, NNHyper, LRHyper, LR_Context
-from experiments.adult.node import BaseNodes
-from experiments.adult.utils import get_device, seed_everything, set_logger, TP_FP_TN_FN, metrics
+from experiments.new.models import NN_Context, NNHyper, LRHyper, LR_Context
+from experiments.new.node import BaseNodes
+from experiments.new.utils import get_device, seed_everything, set_logger, TP_FP_TN_FN, metrics
 from torch.utils.tensorboard import SummaryWriter
 import matplotlib.pyplot as plt
 import seaborn as sn
@@ -197,8 +197,8 @@ def train(writer, data_name,model_name,classes_per_node,num_nodes,steps,inner_st
 
                 inner_optim = torch.optim.Adam(model.parameters(), lr=inner_lr, weight_decay=inner_wd)
 
-                # save starting config
-                inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
+            # save starting config
+            inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
 
             model.train()
             inner_optim.zero_grad()
@@ -251,6 +251,7 @@ def train(writer, data_name,model_name,classes_per_node,num_nodes,steps,inner_st
     logging.info(f"\n\nFinal Results | AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}")
     for i in range(num_nodes):
         print("\nClient", i+1)
+        print(i)
         print(f"Acc: {all_acc[i]:.4f}, F Acc: {f_a[i]:.4f}, M Acc: {m_a[i]:.4f}, F1: {f1[i]:.4f}, AOD: {aod[i]:.4f}, EOD: {eod[i]:.4f}, SPD: {spd[i]:.4f}")
     # tune.report(accuracy=avg_acc, SPD=abs(np.max(spd)))
 
@@ -269,7 +270,7 @@ def main(num_samples, max_num_epochs, gpus_per_trial):
     parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
     parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
     parser.add_argument("--inner_lr", type=float, default=1e-3, help="learning rate for inner optimizer")
-    parser.add_argument("--lr", type=float, default=1e-3, help="learning rate")
+    parser.add_argument("--lr", type=float, default=5e-4, help="learning rate")
     parser.add_argument("--wd", type=float, default=1e-5, help="weight decay")
     parser.add_argument("--inner_wd", type=float, default=1e-5, help="inner weight decay")
     parser.add_argument("--embed_dim", type=int, default=10, help="embedding dim")
@@ -278,8 +279,8 @@ def main(num_samples, max_num_epochs, gpus_per_trial):
     parser.add_argument("--eval_every", type=int, default=50, help="eval every X selected epochs")
     parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results", help="dir path for output file")
     parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=50, help="fairness/accuracy trade-off parameter")
+    parser.add_argument("--fair", type=str, default="dp", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
+    parser.add_argument("--alpha", type=int, default=20, help="fairness/accuracy trade-off parameter")
     args = parser.parse_args()
     assert args.gpu <= torch.cuda.device_count()
     set_logger()
