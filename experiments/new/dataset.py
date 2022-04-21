@@ -126,6 +126,38 @@ def get_dataset(data_name, fair):
         train = clean_and_encode_dataset(read_dataset(TRAIN_DATA_FILE, data_types, 'adult'), 'adult', fair)  #(32561, 14)
         test = clean_and_encode_dataset(read_dataset(TEST_DATA_FILE, data_types, 'adult'), 'adult', fair)    #(16281, 14)
 
+        train_set_1 = train[train['workclass'] == 1]
+        train_set_2 = train[train['workclass'] != 1]
+
+        test_set_1 = test[test['workclass'] == 1]
+        test_set_2 = test[test['workclass'] != 1]
+
+        cols = train_set_1.columns
+        if fair == 'none':
+            features, decision, sensitive = cols[:-1], cols[-1], None
+        else:
+            features, decision, sensitive = cols[:-2], cols[-2], cols[-1]
+
+        data_train_1 = TabularData(train_set_1[features].values, train_set_1[decision].values, None, fair)
+        data_test_1 = TabularData(test_set_1[features].values, test_set_1[decision].values, None, fair)
+
+        data_train_2 = TabularData(train_set_2[features].values, train_set_2[decision].values, None, fair)
+        data_test_2 = TabularData(test_set_2[features].values, test_set_2[decision].values, None, fair)
+
+        train_sets = [train_set_1, train_set_2]
+        test_sets = [test_set_1, test_set_2]
+
+        d_train_all = pd.concat(train_sets)
+        d_test_all = pd.concat(test_sets)
+        data_train_all = TabularData(d_train_all[features].values, d_train_all[decision].values,
+                                     None, fair)
+        data_test_all = TabularData(d_test_all[features].values, d_test_all[decision].values,
+                                    None, fair)
+
+        all_data = [data_train_1, data_train_2, data_test_1, data_test_2]
+
+        return all_data, features, data_train_all, data_test_all, sensitive
+
     elif data_name == 'compas':
         train = clean_and_encode_dataset(read_dataset(None, None, 'compas'), 'compas', fair)
         client_1 = train[train['age'] <= 31]  # 3164

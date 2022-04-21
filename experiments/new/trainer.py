@@ -65,10 +65,9 @@ def evaluate(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss):
 
 
         for batch_count, batch in enumerate(curr_data):
-            x, y, s = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
+            x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
             true_client.extend(y.cpu().numpy())
             queries_client.extend(x.cpu().numpy())
-            sensitive_client.extend(s.cpu().numpy())
 
             avg_context_vector = model(x.to(device), context_only=True)
             weights = hnet(avg_context_vector, torch.tensor([node_id], dtype=torch.long).to(device))
@@ -85,7 +84,7 @@ def evaluate(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss):
             if fair == 'none':
                 running_loss += loss(pred, y.unsqueeze(1)).item()
             else:
-                running_loss += (loss(pred, y.unsqueeze(1)) + fair_loss(x, pred, s, y).to(device)).item()
+                running_loss += (loss(pred, y.unsqueeze(1)) + fair_loss(x, pred, x, y).to(device)).item()
 
             correct = torch.eq(pred_thresh,y.unsqueeze(1)).type(torch.cuda.LongTensor)
             running_correct += torch.count_nonzero(correct).item()
@@ -181,7 +180,7 @@ def train(writer, data_name,model_name,classes_per_node,num_nodes,steps,inner_st
         for j in range(inner_steps):
             # get new batch
             batch = next(iter(nodes.train_loaders[node_id]))
-            x, y, s = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
+            x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
 
             # if torch.min(x, dim=0).values[0] < 31 and torch.max(x, dim=0).values[0] > 31:
             #     print('True:', torch.min(x, dim=0).values[0], torch.max(x, dim=0).values[0])
@@ -209,7 +208,7 @@ def train(writer, data_name,model_name,classes_per_node,num_nodes,steps,inner_st
             if fair == 'none':
                 err = loss(pred, y.unsqueeze(1))
             else:
-                err = loss(pred, y.unsqueeze(1)) + fair_loss(x, pred, s, y).to(device)
+                err = loss(pred, y.unsqueeze(1))
 
             err.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 50)
@@ -228,7 +227,7 @@ def train(writer, data_name,model_name,classes_per_node,num_nodes,steps,inner_st
         optimizer.step()
 
         if step % eval_every == 49 or step == 999 or step == 0:
-            step_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, model, loss, device, confusion=False, fair=fair, fair_loss=fair_loss)
+            step_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, model, loss, device, confusion=False, fair=fair, fair_loss=None)
 
             logging.info(f"\nStep: {step + 1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}")
             writer.add_scalars('testing accuracy', {
@@ -247,7 +246,7 @@ def train(writer, data_name,model_name,classes_per_node,num_nodes,steps,inner_st
             }, step)
 
 
-    step_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, model, loss, device, confusion=False,fair=fair, fair_loss = fair_loss)
+    step_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, model, loss, device, confusion=False,fair=fair, fair_loss = None)
     logging.info(f"\n\nFinal Results | AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}")
     for i in range(num_nodes):
         print("\nClient", i+1)
@@ -262,8 +261,8 @@ def main(num_samples, max_num_epochs, gpus_per_trial):
 
     parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-    parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
-    parser.add_argument("--model_name", type=str, default="NN", choices=["NN", "LR"], help="choice of model")
+    parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
+    parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
     parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
     parser.add_argument("--num_steps", type=int, default=1000)
     parser.add_argument("--batch_size", type=int, default=256)
@@ -279,7 +278,7 @@ def main(num_samples, max_num_epochs, gpus_per_trial):
     parser.add_argument("--eval_every", type=int, default=50, help="eval every X selected epochs")
     parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results", help="dir path for output file")
     parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="dp", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
+    parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
     parser.add_argument("--alpha", type=int, default=20, help="fairness/accuracy trade-off parameter")
     args = parser.parse_args()
     assert args.gpu <= torch.cuda.device_count()

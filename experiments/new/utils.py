@@ -28,7 +28,7 @@ def TP_FP_TN_FN(x, predicted_prediction, labels_pred, fair):
 
     for i in range(len(x)):
         if fair == 'none':
-            if x[i][5].item() == 0:
+            if x[i][9].item() == 0:
                 if predicted_prediction[i] == 1 and labels_pred[i] == 1:
                     TP[1] += 1
                     TP[0] += 1
