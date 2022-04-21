@@ -19,12 +19,13 @@ class NN(nn.Module):
         super(NN, self).__init__()
         self.input_size = input_size
         self.dropout_rate = dropout_rate
+        self.hidden_size = hidden_size
 
-        self.fc1 = nn.Linear(self.input_size, self.nn_hidden_size)
-        self.fc2 = nn.Linear(self.nn_hidden_size, self.nn_hidden_size)
-        self.fc3 = nn.Linear(self.nn_hidden_size, 1)
+        self.fc1 = nn.Linear(self.input_size, self.hidden_size)
+        self.fc2 = nn.Linear(self.hidden_size, self.hidden_size)
+        self.fc3 = nn.Linear(self.hidden_size, 1)
         self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(self.dropout)
+        self.dropout = nn.Dropout(self.dropout_rate)
 
     def forward(self, data):
         prediction = self.dropout(self.relu(self.fc1(data)))

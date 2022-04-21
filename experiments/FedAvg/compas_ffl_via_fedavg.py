@@ -7,31 +7,13 @@ import torch.nn as nn
 from experiments.adult.utils import seed_everything, metrics, TP_FP_TN_FN
 from models import LR, NN
 from experiments.adult.node import BaseNodes
+from fairtorch import DemographicParityLoss, EqualiedOddsLoss
 
 warnings.filterwarnings("ignore")
 
-no_cuda=False
-gpus='5'
+no_cuda = False
+gpus = '5'
 device = torch.cuda.set_device(5)
-
-def train_no_dp(model, train_loader, loss, optimizer):
-    model.train()
-    correct = 0
-    running_loss = 0.0
-
-    for i, (x, y) in enumerate(train_loader):
-        optimizer.zero_grad()
-        y_, y_raw = model(x.to(device))
-        err = loss(y_raw.flatten(), y.to(device))
-        err = err.mean()
-        running_loss += err.item() * x.size(0)
-        err.backward()
-        optimizer.step()
-
-        preds = y_.round().reshape(1, len(y_))
-        correct += (preds.eq(y)).sum().item()
-
-    return (running_loss / len(train_loader)), (100 * correct/ len(train_loader.dataset))
 
 def validation_no_dp(model, num_samples, loss):
     model.eval()
@@ -39,9 +21,6 @@ def validation_no_dp(model, num_samples, loss):
     running_loss = 0.0
     running_correct = 0
     running_samples = 0
-    pred_client = []
-    true_client = []
-    queries_client = []
     len_test_loaders = 0
     aod = []
     eod = []
@@ -54,6 +33,9 @@ def validation_no_dp(model, num_samples, loss):
     m_a = []
 
     for node_id in range(num_samples):
+        pred_client = []
+        true_client = []
+        queries_client = []
         curr_data = nodes.test_loaders[node_id]
         len_test_loaders += len(nodes.test_loaders[node_id])
         for batch_count, batch in enumerate(curr_data):
@@ -85,9 +67,12 @@ def validation_no_dp(model, num_samples, loss):
         spd.append(SPD)
 
     running_loss /= len_test_loaders
-    return predictions, running_loss, np.mean(f1), np.mean(f1_f), np.mean(f1_m), np.mean(a), np.mean(f_a), np.mean(m_a), np.mean(aod), np.mean(eod), np.mean(spd)
+    return predictions, running_loss, np.mean(f1), np.mean(f1_f), np.mean(f1_m), np.mean(a), np.mean(f_a), np.mean(
+        m_a), np.mean(aod), np.mean(eod), np.mean(spd)
 
-def send_main_model_to_nodes_and_update_model_dict(main_model, model_dict, number_of_samples, number_of_clients_per_round):
+
+def send_main_model_to_nodes_and_update_model_dict(main_model, model_dict, number_of_samples,
+                                                   number_of_clients_per_round):
     sampled = []
 
     with torch.no_grad():
@@ -98,19 +83,13 @@ def send_main_model_to_nodes_and_update_model_dict(main_model, model_dict, numbe
             model_dict[name_of_models[node_id]].fc1.weight.data = main_model.fc1.weight.data.clone()
             model_dict[name_of_models[node_id]].fc1.bias.data = main_model.fc1.bias.data.clone()
 
-            # model_dict[name_of_models[node_i]].fc2.weight.data = main_model.fc2.weight.data.clone()
-            # model_dict[name_of_models[node_i]].fc2.bias.data = main_model.fc2.bias.data.clone()
+            # model_dict[name_of_models[node_id]].fc2.weight.data = main_model.fc2.weight.data.clone()
+            # model_dict[name_of_models[node_id]].fc2.bias.data = main_model.fc2.bias.data.clone()
             #
-            # model_dict[name_of_models[node_i]].fc3.weight.data = main_model.fc3.weight.data.clone()
-            # model_dict[name_of_models[node_i]].fc3.bias.data = main_model.fc3.bias.data.clone()
-            #
-            # model_dict[name_of_models[node_i]].fc4.weight.data = main_model.fc4.weight.data.clone()
-            # model_dict[name_of_models[node_i]].fc4.bias.data = main_model.fc4.bias.data.clone()
-            #
-            # model_dict[name_of_models[node_i]].fc5.weight.data = main_model.fc5.weight.data.clone()
-            # model_dict[name_of_models[node_i]].fc5.bias.data = main_model.fc5.bias.data.clone()
-
+            # model_dict[name_of_models[node_id]].fc3.weight.data = main_model.fc3.weight.data.clone()
+            # model_dict[name_of_models[node_id]].fc3.bias.data = main_model.fc3.bias.data.clone()
         return model_dict, sampled
+
 
 def create_model_optimizer_criterion_dict(number_of_samples):
     model_dict = dict()
@@ -134,6 +113,7 @@ def create_model_optimizer_criterion_dict(number_of_samples):
         criterion_dict.update({criterion_name: criterion_info})
 
     return model_dict, optimizer_dict, criterion_dict
+
 
 def start_train_end_node_process_print_some(sampled):
     for i, client in enumerate(sampled):
@@ -160,18 +140,12 @@ def start_train_end_node_process_print_some(sampled):
 def get_averaged_weights(model_dict, sampled):
     fc1_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc1.weight.shape)
     fc1_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc1.bias.shape)
-
+    #
     # fc2_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc2.weight.shape)
     # fc2_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc2.bias.shape)
     #
     # fc3_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc3.weight.shape)
     # fc3_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc3.bias.shape)
-    #
-    # fc4_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc4.weight.shape)
-    # fc4_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc4.bias.shape)
-    #
-    # fc5_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc5.weight.shape)
-    # fc5_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc5.bias.shape)
 
     with torch.no_grad():
         for i, client in enumerate(sampled):
@@ -183,33 +157,21 @@ def get_averaged_weights(model_dict, sampled):
             #
             # fc3_mean_weight += model_dict[name_of_models[client]].fc3.weight.data.clone()
             # fc3_mean_bias += model_dict[name_of_models[client]].fc3.bias.data.clone()
-            #
-            # fc4_mean_weight += model_dict[name_of_models[client]].fc4.weight.data.clone()
-            # fc4_mean_bias += model_dict[name_of_models[client]].fc4.bias.data.clone()
-            #
-            # fc5_mean_weight += model_dict[name_of_models[client]].fc5.weight.data.clone()
-            # fc5_mean_bias += model_dict[name_of_models[client]].fc5.bias.data.clone()
 
         fc1_mean_weight = fc1_mean_weight / number_of_samples
         fc1_mean_bias = fc1_mean_bias / number_of_samples
-        #
+
         # fc2_mean_weight = fc2_mean_weight / number_of_samples
         # fc2_mean_bias = fc2_mean_bias / number_of_samples
         #
         # fc3_mean_weight = fc3_mean_weight / number_of_samples
         # fc3_mean_bias = fc3_mean_bias / number_of_samples
-        #
-        # fc4_mean_weight = fc4_mean_weight / number_of_samples
-        # fc4_mean_bias = fc4_mean_bias / number_of_samples
-        #
-        # fc5_mean_weight = fc5_mean_weight / number_of_samples
-        # fc5_mean_bias = fc5_mean_bias / number_of_samples
 
-    return fc1_mean_weight, fc1_mean_bias#, fc2_mean_weight, fc2_mean_bias, fc3_mean_weight, fc3_mean_bias, fc4_mean_weight, fc4_mean_bias, fc5_mean_weight, fc5_mean_bias
+    return fc1_mean_weight, fc1_mean_bias #, fc2_mean_weight, fc2_mean_bias, fc3_mean_weight, fc3_mean_bias
 
 
-def set_averaged_weights_as_main_model_weights_and_update_main_model(main_model,model_dict, sampled):
-    #fc1_mean_weight, fc1_mean_bias, fc2_mean_weight, fc2_mean_bias, fc3_mean_weight, fc3_mean_bias, fc4_mean_weight, fc4_mean_bias, fc5_mean_weight, fc5_mean_bias = get_averaged_weights(model_dict, number_of_samples=number_of_samples)
+def set_averaged_weights_as_main_model_weights_and_update_main_model(main_model, model_dict, sampled):
+    #fc1_mean_weight, fc1_mean_bias, fc2_mean_weight, fc2_mean_bias, fc3_mean_weight, fc3_mean_bias = get_averaged_weights(model_dict, sampled)
     fc1_mean_weight, fc1_mean_bias = get_averaged_weights(model_dict, sampled)
 
     with torch.no_grad():
@@ -221,14 +183,9 @@ def set_averaged_weights_as_main_model_weights_and_update_main_model(main_model,
         #
         # main_model.fc3.weight.data = fc3_mean_weight.data.clone()
         # main_model.fc3.bias.data = fc3_mean_bias.data.clone()
-        #
-        # main_model.fc4.weight.data = fc4_mean_weight.data.clone()
-        # main_model.fc4.bias.data = fc4_mean_bias.data.clone()
-        #
-        # main_model.fc5.weight.data = fc5_mean_weight.data.clone()
-        # main_model.fc5.bias.data = fc5_mean_bias.data.clone()
 
     return main_model
+
 
 seed_everything(0)
 number_of_samples = 4
@@ -245,14 +202,14 @@ times_all, roc_all = [], []
 m = "log-reg"
 
 if m == "log-reg":
-    main_model = LR(input_size = 10)
+    main_model = LR(input_size=10)
     learning_rate = .003
-    num_epoch = 50         # local
+    num_epoch = 50  # local
     wd = 0.00001
 else:
-    main_model = NN(input_size = 10)
+    main_model = NN(input_size=10)
     learning_rate = .005
-    num_epoch = 50         # local
+    num_epoch = 50  # local
     wd = 0.00001
 
 loss = nn.BCEWithLogitsLoss(reduction='mean')
@@ -264,20 +221,22 @@ name_of_models = list(model_dict.keys())
 name_of_optimizers = list(optimizer_dict.keys())
 name_of_criterions = list(criterion_dict.keys())
 
-print('~'*22)
+print('~' * 22)
 print('~~~ Start Training ~~~')
-print('~'*22,'\n')
+print('~' * 22, '\n')
 results_main_model = []
 
-num_client_sample_per_round = 2
+num_client_sample_per_round = 1
 
 for i in range(1000):
     start = time.time()
-    model_dict, sampled = send_main_model_to_nodes_and_update_model_dict(main_model, model_dict, number_of_samples, num_client_sample_per_round)
+    model_dict, sampled = send_main_model_to_nodes_and_update_model_dict(main_model, model_dict, number_of_samples,
+                                                                         num_client_sample_per_round)
     start_train_end_node_process_print_some(sampled)
     main_model = set_averaged_weights_as_main_model_weights_and_update_main_model(main_model, model_dict, sampled)
     end = time.time()
-    predictions, running_loss_test, f1_score_prediction, f1_female, f1_male, accuracy, f_acc, m_acc, aod, eod, spd = validation_no_dp(main_model,number_of_samples, main_criterion)
+    predictions, running_loss_test, f1_score_prediction, f1_female, f1_male, accuracy, f_acc, m_acc, aod, eod, spd = validation_no_dp(
+        main_model, number_of_samples, main_criterion)
 
     times_all.append(end - start)
     f1_all.append(f1_score_prediction)
@@ -290,15 +249,15 @@ for i in range(1000):
     acc_all.append(accuracy)
     F_ACC_all.append(f_acc)
     M_ACC_all.append(m_acc)
-    
+
     print("\nIteration", str(i + 1), ": main_model accuracy on all test data: {:7.4f}".format(accuracy))
     print("\n")
 
 print('\n')
 
-print('~'*30)
+print('~' * 30)
 print('~        Global Model        ~')
-print('~'*30)
+print('~' * 30)
 print('*******************')
 print('*       all       *')
 print('*******************')
@@ -320,4 +279,4 @@ print('********************')
 print('Test Accuracy: {0:1.3f}'.format(M_ACC_all[len(M_ACC_all) - 1]))
 print('F1: {0:1.3f}'.format(M_F1_all[len(M_F1_all) - 1]))
 
-print('Aggregate and Update Time: {0:1.2f}'.format(times_all[len(times_all) - 1]))
+print('Aggregate and Update Time: {0:1.2f}'.format(np.sum(times_all)))
