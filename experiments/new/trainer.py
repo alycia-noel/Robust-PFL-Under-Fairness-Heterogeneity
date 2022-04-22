@@ -252,9 +252,9 @@ def main():
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
     parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
-    parser.add_argument("--inner_lr", type=float, default=5e-3, help="learning rate for inner optimizer")
+    parser.add_argument("--inner_lr", type=float, default=3e-3, help="learning rate for inner optimizer")
     parser.add_argument("--lr", type=float, default=1e-4, help="learning rate")
-    parser.add_argument("--wd", type=float, default=1e-5, help="weight decay")
+    parser.add_argument("--wd", type=float, default=1e-6, help="weight decay")
     parser.add_argument("--inner_wd", type=float, default=1e-6, help="inner weight decay")
     parser.add_argument("--embed_dim", type=int, default=10, help="embedding dim")
     parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
@@ -268,7 +268,7 @@ def main():
     assert args.gpu <= torch.cuda.device_count()
     set_logger()
 
-    #3e-3, 1e-4, 1e-5, 1e-6 : .6705
+    #3e-3, 1e-4, 1e-6, 1e-6 : .6724
     device = get_device(gpus=args.gpu)
 
     args.classes_per_node = 2
