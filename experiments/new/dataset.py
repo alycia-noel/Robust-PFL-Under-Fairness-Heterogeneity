@@ -8,27 +8,24 @@ from collections import OrderedDict
 from sklearn.model_selection import train_test_split
 import numpy as np
 from collections import defaultdict
+from torch.utils.data.sampler import SubsetRandomSampler
 
 class TabularData(Dataset):
-    def __init__(self, X, y, s, fair):
+    def __init__(self, X, y):
         assert len(X) == len(y)
         n, m = X.shape
         self.n = n
         self.m = m
         self.X = torch.tensor(X)
         self.y = torch.tensor(y)
-        self.fair = fair
-        if fair != 'none':
-            self.s = torch.tensor(s, dtype=torch.float64)
 
     def __len__(self):
         return self.n
 
     def __getitem__(self, idx):
-        if self.fair == 'none':
-            return self.X[idx], self.y[idx]
-        else:
-            return self.X[idx], self.y[idx], self.s[idx]
+
+        return self.X[idx], self.y[idx]
+
 
 
 def read_dataset(path, data_types, data_name):
@@ -52,7 +49,7 @@ def read_dataset(path, data_types, data_name):
         data = pd.read_csv(url)
     return data
 
-def clean_and_encode_dataset(data, data_name, fair):
+def clean_and_encode_dataset(data, data_name):
     if data_name == 'adult':
         data['income_class'] = data.income_class.str.rstrip('.').astype('category')
 
@@ -76,16 +73,13 @@ def clean_and_encode_dataset(data, data_name, fair):
         data = data.loc[data['is_recid'] != -1]
         data = data.loc[data['c_charge_degree'] != "O"]
         data = data.loc[data['score_text'] != 'N/A']
+        #data['race'].loc[data['race'] != "Caucasian"] = 'Other'
         data['is_med_or_high_risk'] = (data['decile_score'] >= 5).astype(int)
         data['length_of_stay'] = (
                 pd.to_datetime(data['c_jail_out']) - pd.to_datetime(data['c_jail_in']))
 
-        if fair == 'none':
-            cols = ['age', 'c_charge_degree', 'race', 'age_cat', 'score_text', 'sex', 'priors_count', 'length_of_stay',
-                    'days_b_screening_arrest', 'decile_score', 'two_year_recid']
-        else:
-            cols = ['age', 'c_charge_degree', 'race', 'age_cat', 'score_text', 'priors_count', 'length_of_stay',
-                    'days_b_screening_arrest', 'decile_score', 'two_year_recid', 'sex']
+        #cols = ['age', 'c_charge_degree', 'sex', 'age_cat', 'score_text', 'race', 'priors_count', 'length_of_stay', 'days_b_screening_arrest', 'decile_score', 'two_year_recid']
+        cols = ['age', 'c_charge_degree', 'race', 'age_cat', 'score_text', 'sex', 'priors_count', 'length_of_stay', 'days_b_screening_arrest', 'decile_score', 'two_year_recid']
 
         data = data[cols]
 
@@ -93,12 +87,14 @@ def clean_and_encode_dataset(data, data_name, fair):
         data['length_of_stay'] = np.ceil(data['length_of_stay'])
 
         encoders = {}
-        for col in ['race', 'sex', 'c_charge_degree', 'score_text', 'age_cat']:
+
+        for col in ['sex','race', 'c_charge_degree', 'score_text', 'age_cat']:
             encoders[col] = LabelEncoder().fit(data[col])
             data.loc[:, col] = encoders[col].transform(data[col])
+
     return data
 
-def get_dataset(data_name, fair):
+def get_dataset(data_name, num_clients):
     if data_name == 'adult':
 
         CURRENT_DIR = os.path.abspath(os.path.dirname(__name__))
@@ -123,8 +119,8 @@ def get_dataset(data_name, fair):
             ("income_class", "category"),
         ])
 
-        train = clean_and_encode_dataset(read_dataset(TRAIN_DATA_FILE, data_types, 'adult'), 'adult', fair)  #(32561, 14)
-        test = clean_and_encode_dataset(read_dataset(TEST_DATA_FILE, data_types, 'adult'), 'adult', fair)    #(16281, 14)
+        train = clean_and_encode_dataset(read_dataset(TRAIN_DATA_FILE, data_types, 'adult'), 'adult')  #(32561, 14)
+        test = clean_and_encode_dataset(read_dataset(TEST_DATA_FILE, data_types, 'adult'), 'adult')    #(16281, 14)
 
         train_set_1 = train[train['workclass'] == 1]
         train_set_2 = train[train['workclass'] != 1]
@@ -133,177 +129,97 @@ def get_dataset(data_name, fair):
         test_set_2 = test[test['workclass'] != 1]
 
         cols = train_set_1.columns
-        if fair == 'none':
-            features, decision, sensitive = cols[:-1], cols[-1], None
-        else:
-            features, decision, sensitive = cols[:-2], cols[-2], cols[-1]
 
-        data_train_1 = TabularData(train_set_1[features].values, train_set_1[decision].values, None, fair)
-        data_test_1 = TabularData(test_set_1[features].values, test_set_1[decision].values, None, fair)
+        features, decision = cols[:-1], cols[-1]
 
-        data_train_2 = TabularData(train_set_2[features].values, train_set_2[decision].values, None, fair)
-        data_test_2 = TabularData(test_set_2[features].values, test_set_2[decision].values, None, fair)
+        data_train_1 = TabularData(train_set_1[features].values, train_set_1[decision].valuesr)
+        data_test_1 = TabularData(test_set_1[features].values, test_set_1[decision].values)
+
+        data_train_2 = TabularData(train_set_2[features].values, train_set_2[decision].values)
+        data_test_2 = TabularData(test_set_2[features].values, test_set_2[decision].values)
 
         train_sets = [train_set_1, train_set_2]
         test_sets = [test_set_1, test_set_2]
 
         d_train_all = pd.concat(train_sets)
         d_test_all = pd.concat(test_sets)
-        data_train_all = TabularData(d_train_all[features].values, d_train_all[decision].values,
-                                     None, fair)
-        data_test_all = TabularData(d_test_all[features].values, d_test_all[decision].values,
-                                    None, fair)
+        data_train_all = TabularData(d_train_all[features].values, d_train_all[decision].values)
+        data_test_all = TabularData(d_test_all[features].values, d_test_all[decision].values)
 
         all_data = [data_train_1, data_train_2, data_test_1, data_test_2]
 
-        return all_data, features, data_train_all, data_test_all, sensitive
+        return all_data, features, data_train_all, data_test_all
 
     elif data_name == 'compas':
-        train = clean_and_encode_dataset(read_dataset(None, None, 'compas'), 'compas', fair)
+        train = clean_and_encode_dataset(read_dataset(None, None, 'compas'), 'compas')
         client_1 = train[train['age'] <= 31]  # 3164
 
         client_2 = train[train['age'] > 31]  # 3008
 
         cols = client_1.columns
-        if fair == 'none':
-            features, decision, sensitive = cols[:-1], cols[-1], None
-        else:
-            features, decision, sensitive = cols[:-2], cols[-2], cols[-1]
 
-        if fair == 'none':
-            sensitive = None
-            d_train_1, d_test_1 = train_test_split(client_1, test_size=300)
-            data_train_1 = TabularData(d_train_1[features].values, d_train_1[decision].values, None, fair)
-            data_test_1 = TabularData(d_test_1[features].values, d_test_1[decision].values, None, fair)
+        features, decision = cols[:-1], cols[-1]
 
-            d_train_2, d_test_2 = train_test_split(client_2, test_size=300)
-            data_train_2 = TabularData(d_train_2[features].values, d_train_2[decision].values, None, fair)
-            data_test_2 = TabularData(d_test_2[features].values, d_test_2[decision].values, None, fair)
+        d_train_g_1, d_test_g_1 = train_test_split(client_1, test_size=300)
+        d_train_g_2, d_test_g_2 = train_test_split(client_2, test_size=300)
 
-            train_sets = [d_train_1, d_train_2]
-            test_sets = [d_test_1, d_test_2]
+        d_train_g_1 = d_train_g_1.sample(frac=1).reset_index(drop=True)
+        d_train_g_2 = d_train_g_2.sample(frac=1).reset_index(drop=True)
+        d_test_g_1 = d_test_g_1.sample(frac=1).reset_index(drop=True)
+        d_test_g_2 = d_test_g_2.sample(frac=1).reset_index(drop=True)
 
-            d_train_all = pd.concat(train_sets)
-            d_test_all = pd.concat(test_sets)
-            data_train_all = TabularData(d_train_all[features].values, d_train_all[decision].values, None, fair)
-            data_test_all = TabularData(d_test_all[features].values, d_test_all[decision].values, None, fair)
+        train_sets = [d_train_g_1, d_train_g_2]
+        test_sets = [d_test_g_1, d_test_g_2]
 
-        else:
-            d_train_1, d_test_1 = train_test_split(client_1, test_size=300)
-            data_train_1 = TabularData(d_train_1[features].values, d_train_1[decision].values, d_train_1[sensitive].values, fair)
-            data_test_1 = TabularData(d_test_1[features].values, d_test_1[decision].values, d_test_1[sensitive].values, fair)
+        d_train_all = pd.concat(train_sets)
+        d_test_all = pd.concat(test_sets)
 
-            d_train_2, d_test_2 = train_test_split(client_2, test_size=300)
-            data_train_2 = TabularData(d_train_2[features].values, d_train_2[decision].values, d_train_2[sensitive].values, fair)
-            data_test_2 = TabularData(d_test_2[features].values, d_test_2[decision].values, d_test_2[sensitive].values, fair)
 
-            train_sets = [d_train_1, d_train_2]
-            test_sets = [d_test_1, d_test_2]
+    return d_train_all, d_test_all, len(d_train_g_1), len(d_test_g_1), features, decision
 
-            d_train_all = pd.concat(train_sets)
-            d_test_all = pd.concat(test_sets)
-            data_train_all = TabularData(d_train_all[features].values, d_train_all[decision].values, d_train_all[sensitive].values, fair)
-            data_test_all = TabularData(d_test_all[features].values, d_test_all[decision].values, d_test_all[sensitive].values, fair)
 
-        all_data = [data_train_1, data_train_2, data_test_1, data_test_2]
-
-    return all_data, features, data_train_all, data_test_all, sensitive
-
-def get_num_classes_samples(dataset, dataset_split_point_start, dataset_split_point_end):
-    data_labels_list = np.array(dataset.y)
-    data_labels_list = data_labels_list[dataset_split_point_start:dataset_split_point_end]
-    classes, num_samples = np.unique(data_labels_list, return_counts=True)
-    num_classes = len(classes)
-    return num_classes, num_samples, data_labels_list
-
-def gen_classes_per_node(dataset, num_users, classes_per_user, dataset_split_point_start, dataset_split_point_end, high_prob=0.6, low_prob=0.4):
-    num_classes, num_samples, _ = get_num_classes_samples(dataset, dataset_split_point_start, dataset_split_point_end)
-
-    assert (classes_per_user * num_users) % num_classes == 0
-    count_per_class = (classes_per_user * num_users) // num_classes
-    class_dict = {}
-    for i in range(num_classes):
-        probs = np.random.uniform(low_prob, high_prob, size=count_per_class)
-        probs_norm = (probs / probs.sum()).tolist()
-        class_dict[i] = {'count': count_per_class, 'prob': probs_norm}
-
-    class_partitions = defaultdict(list)
-    for i in range(num_users):
-        c = []
-        for _ in range(classes_per_user):
-            class_counts = [class_dict[i]['count'] for i in range(num_classes)]
-            max_class_counts = np.where(np.array(class_counts) == max(class_counts))[0]
-            c.append(np.random.choice(max_class_counts))
-            class_dict[c[-1]]['count'] -= 1
-        class_partitions['class'].append(c)
-        class_partitions['prob'].append([class_dict[i]['prob'].pop() for i in c])
-    return class_partitions
-
-def gen_data_split(dataset, num_users, class_partitions, dataset_split_point_start, dataset_split_point_end):
-    num_classes, num_samples, data_labels_list = get_num_classes_samples(dataset,dataset_split_point_start, dataset_split_point_end)
-    data_class_idx = {i: np.where(data_labels_list == i)[0] for i in range(num_classes)}
-
-    for data_idx in data_class_idx.values():
-        random.shuffle(data_idx)
-
-    user_data_idx = [[] for i in range(num_users)]
-    for usr_i in range(num_users):
-        for c, p in zip(class_partitions['class'][usr_i], class_partitions['prob'][usr_i]):
-            end_idx = int(num_samples[c] * p)
-            user_data_idx[usr_i].extend(data_class_idx[c][:end_idx])
-            data_class_idx[c] = data_class_idx[c][end_idx:]
-    return user_data_idx
-
-def gen_random_loaders(data_name, num_users, bz, classes_per_user, fair):
+def gen_random_loaders(data_name, num_users, bz, classes_per_user):
     loader_params = {"batch_size": bz, "shuffle": False, "pin_memory": True, "num_workers": 0}
 
-    num_users_1 = random.randint(1, num_users-1)
-    num_users_2 = abs(num_users - num_users_1)
-
     dataloaders = []
-    subsets_train = []
-    subsets_test = []
-    cls_partitions_1 = []
-    cls_partitions_2 = []
-    datasets, features, all_train, all_test, sensitive = get_dataset(data_name, fair)
+
+    group_all_train_data, group_all_test_data, len_d_train_g_1, len_d_test_g_1, features, decision = get_dataset(data_name, num_users)
+
+    datasets = [group_all_train_data, group_all_test_data]
+
 
     for i, d in enumerate(datasets):
+        usr_subset_idx = [[] for i in range(num_users)]
+        data_copy = d
         if i == 0:
-            dataset_split_point_start = 0
-            dataset_split_point_end = len(datasets[0])  # 2864
-            num_users = num_users_1
-            cls_partitions_1 = gen_classes_per_node(all_train, num_users, classes_per_user, dataset_split_point_start, dataset_split_point_end)
+            for usr_i in range(num_users):
+                if usr_i == 0 or usr_i == 1:
+                    end_idx = int(len_d_train_g_1/ 2)
+                if usr_i == 2 or usr_i == 3:
+                    end_idx = int(len(data_copy) / 2)
+
+                usr_subset_idx[usr_i].extend(TabularData(data_copy[:end_idx][features].values, data_copy[:end_idx][decision].values))
+                data_copy = data_copy[end_idx:]
+
+            subsets = list(usr_subset_idx)
             loader_params['shuffle'] = True
-            user_subset_idx_1 = gen_data_split(all_train, num_users, cls_partitions_1, dataset_split_point_start, dataset_split_point_end)
-            subsets_train = list(map(lambda x: torch.utils.data.Subset(all_train, x), user_subset_idx_1))
+            dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params), subsets)))
 
         elif i == 1:
-            dataset_split_point_start = len(datasets[0])  # 2864
-            dataset_split_point_end= len(all_train)
-            num_users = num_users_2
-            cls_partitions_2 = gen_classes_per_node(all_train, num_users, classes_per_user, dataset_split_point_start, dataset_split_point_end)
-            loader_params['shuffle'] = True
-            user_subset_idx_2 = gen_data_split(all_train, num_users, cls_partitions_2,dataset_split_point_start, dataset_split_point_end)
-            for j in range(num_users):
-                subsets_train.append(torch.utils.data.Subset(all_train, user_subset_idx_2[j]))
-            dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params), subsets_train)))
+            for usr_i in range(num_users):
+                if usr_i == 0 or usr_i == 1:
+                    end_idx = int(len_d_test_g_1 / 2)
+                if usr_i == 2 or usr_i == 3:
+                    end_idx = int(len(data_copy) / 2)
 
-        if i == 2:
-            dataset_split_point_start = 0
-            dataset_split_point_end = len(datasets[2])  # 2864
-            user_subset_idx_1 = gen_data_split(all_test, num_users, cls_partitions_1, dataset_split_point_start, dataset_split_point_end)
-            subsets_test = list(map(lambda x: torch.utils.data.Subset(all_test, x), user_subset_idx_1))
+                usr_subset_idx[usr_i].extend(
+                    TabularData(data_copy[:end_idx][features].values, data_copy[:end_idx][decision].values))
+                data_copy = data_copy[end_idx:]
 
-        elif i == 3:
-            dataset_split_point_start = len(datasets[2])  # 2864
-            dataset_split_point_end= len(all_test)
-            user_subset_idx_2 = gen_data_split(all_test, num_users, cls_partitions_2,dataset_split_point_start, dataset_split_point_end)
-            for j in range(num_users):
-                subsets_test.append(torch.utils.data.Subset(all_test, user_subset_idx_2[j]))
-            dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params), subsets_test)))
+            subsets = list(usr_subset_idx)
 
+            dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params), subsets)))
 
-
-    return dataloaders, features, sensitive
+    return dataloaders, features
 
 

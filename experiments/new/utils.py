@@ -20,67 +20,40 @@ def set_logger():
         level=logging.INFO
     )
 
-def TP_FP_TN_FN(x, predicted_prediction, labels_pred, fair):
+def TP_FP_TN_FN(x, predicted_prediction, labels_pred):
     TP = [0, 0, 0] # all, f, m
     FP = [0, 0, 0]
     FN = [0, 0, 0]
     TN = [0, 0, 0]
 
     for i in range(len(x)):
-        if fair == 'none':
-            if x[i][9].item() == 0:
-                if predicted_prediction[i] == 1 and labels_pred[i] == 1:
-                    TP[1] += 1
-                    TP[0] += 1
-                elif predicted_prediction[i] == 1 and labels_pred[i] == 0:
-                    FP[1] += 1
-                    FP[0] += 1
-                elif predicted_prediction[i] == 0 and labels_pred[i] == 0:
-                    TN[1] += 1
-                    TN[0] += 1
-                elif predicted_prediction[i] == 0 and labels_pred[i] == 1:
-                    FN[1] += 1
-                    FN[0] += 1
-            else:
-                if predicted_prediction[i] == 1 and labels_pred[i] == 1:
-                    TP[2] += 1
-                    TP[0] += 1
-                elif predicted_prediction[i] == 1 and labels_pred[i] == 0:
-                    FP[2] += 1
-                    FP[0] += 1
-                elif predicted_prediction[i] == 0 and labels_pred[i] == 0:
-                    TN[2] += 1
-                    TN[0] += 1
-                elif predicted_prediction[i] == 0 and labels_pred[i] == 1:
-                    FN[2] += 1
-                    FN[0] += 1
+        if x[i][5].item() == 0:
+            if predicted_prediction[i] == 1 and labels_pred[i] == 1:
+                TP[1] += 1
+                TP[0] += 1
+            elif predicted_prediction[i] == 1 and labels_pred[i] == 0:
+                FP[1] += 1
+                FP[0] += 1
+            elif predicted_prediction[i] == 0 and labels_pred[i] == 0:
+                TN[1] += 1
+                TN[0] += 1
+            elif predicted_prediction[i] == 0 and labels_pred[i] == 1:
+                FN[1] += 1
+                FN[0] += 1
         else:
-            if x[i].item() == 0:
-                if predicted_prediction[i] == 1 and labels_pred[i] == 1:
-                    TP[1] += 1
-                    TP[0] += 1
-                elif predicted_prediction[i] == 1 and labels_pred[i] == 0:
-                    FP[1] += 1
-                    FP[0] += 1
-                elif predicted_prediction[i] == 0 and labels_pred[i] == 0:
-                    TN[1] += 1
-                    TN[0] += 1
-                elif predicted_prediction[i] == 0 and labels_pred[i] == 1:
-                    FN[1] += 1
-                    FN[0] += 1
-            else:
-                if predicted_prediction[i] == 1 and labels_pred[i] == 1:
-                    TP[2] += 1
-                    TP[0] += 1
-                elif predicted_prediction[i] == 1 and labels_pred[i] == 0:
-                    FP[2] += 1
-                    FP[0] += 1
-                elif predicted_prediction[i] == 0 and labels_pred[i] == 0:
-                    TN[2] += 1
-                    TN[0] += 1
-                elif predicted_prediction[i] == 0 and labels_pred[i] == 1:
-                    FN[2] += 1
-                    FN[0] += 1
+            if predicted_prediction[i] == 1 and labels_pred[i] == 1:
+                TP[2] += 1
+                TP[0] += 1
+            elif predicted_prediction[i] == 1 and labels_pred[i] == 0:
+                FP[2] += 1
+                FP[0] += 1
+            elif predicted_prediction[i] == 0 and labels_pred[i] == 0:
+                TN[2] += 1
+                TN[0] += 1
+            elif predicted_prediction[i] == 0 and labels_pred[i] == 1:
+                FN[2] += 1
+                FN[0] += 1
+
 
     return TP, FP, TN, FN
 

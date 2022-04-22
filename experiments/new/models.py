@@ -49,7 +49,7 @@ class NNHyper(nn.Module):
         return weights
 
 class LRHyper(nn.Module):
-    def __init__(self, n_nodes, embedding_dim, context_vector_size, hidden_size, hnet_hidden_dim = 100, hnet_n_hidden=3):
+    def __init__(self, n_nodes, embedding_dim, context_vector_size, hidden_size, device, hnet_hidden_dim = 100, hnet_n_hidden=3):
         super().__init__()
 
         self.n_nodes = n_nodes
@@ -58,7 +58,7 @@ class LRHyper(nn.Module):
         self.hidden_dim = hnet_hidden_dim
         self.n_hidden = hnet_n_hidden
         self.hidden_size = hidden_size
-
+        self.device = device
         self.embeddings = nn.Embedding(num_embeddings=self.n_nodes, embedding_dim=self.embedding_dim)
 
         layers = [nn.Linear(self.context_vector_size + self.embedding_dim, self.hidden_dim)]
@@ -75,7 +75,7 @@ class LRHyper(nn.Module):
     def forward(self, context_vec, idx):
         emd = self.embeddings(idx)
         context_vec = context_vec.view(1, self.context_vector_size)
-        hnet_vector = context_vec.expand(len(context_vec), self.embedding_dim)
+        hnet_vector = context_vec.expand(len(context_vec), self.embedding_dim).to(self.device)
         hnet_vector = torch.cat((emd, hnet_vector), dim=1)
         features = self.mlp(hnet_vector)
 
@@ -122,7 +122,7 @@ class LR_Context(nn.Module):
 
         prediction = self.relu(self.fc1(prediction_vector))
 
-        return prediction
+        return prediction, avg_context_vector
 
 class NN_Context(nn.Module):
     def __init__(self, input_size, context_vector_size, context_hidden_size, nn_hidden_size, dropout):
