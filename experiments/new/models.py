@@ -120,7 +120,7 @@ class LR_Context(nn.Module):
         if context_only:
             return avg_context_vector
 
-        prediction = self.relu(self.fc1(prediction_vector))
+        prediction = self.fc1(prediction_vector)
 
         return prediction, avg_context_vector
 

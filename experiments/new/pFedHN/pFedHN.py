@@ -10,7 +10,7 @@ import torch
 import pandas as pd
 import torch.utils.data
 from tqdm import trange
-from experiments.new.models import NN_Context, NNHyper, LRHyper, LR_Context
+from experiments.new.pFedHN.pFedHN_models import NN_Context, NNHyper, LRHyper, LR_Context
 from experiments.new.node import BaseNodes
 from experiments.new.utils import get_device, seed_everything, set_logger, TP_FP_TN_FN, metrics
 from torch.utils.tensorboard import SummaryWriter
@@ -56,7 +56,7 @@ def evaluate(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss):
         pred_client = []
         true_client = []
         queries_client = []
-        sensitive_client = []
+
         running_loss, running_correct, running_samples = 0, 0, 0
 
         curr_data = nodes.test_loaders[node_id]
@@ -68,26 +68,20 @@ def evaluate(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss):
             true_client.extend(y.cpu().numpy())
             queries_client.extend(x.cpu().numpy())
 
-            avg_context_vector = model(x.to(device), context_only=True)
-            weights = hnet(avg_context_vector, torch.tensor([node_id], dtype=torch.long).to(device))
-            net_dict = model.state_dict()
-            hnet_dict = {k: v for k, v in weights.items() if k in net_dict}
-            net_dict.update(hnet_dict)
-            model.load_state_dict(net_dict)
+            weights = hnet(torch.tensor([node_id], dtype=torch.long).to(device))
+            model.load_state_dict(weights)
 
-            pred, _ = model(x, context_only = False)
+            pred = model(x)
             pred_prob = torch.sigmoid(pred)
             pred_thresh = (pred_prob > 0.5).long()
             pred_client.extend(pred_thresh.flatten().cpu().numpy())
 
             if fair == 'none':
-                running_loss += loss(pred, y.unsqueeze(1)).item()
+                running_loss += loss(pred, y).item()
             else:
-                running_loss += (loss(pred, y.unsqueeze(1)) + fair_loss(x, pred, s, y).to(device)).item()
+                running_loss += (loss(pred, y) + fair_loss(x, pred, s, y).to(device)).item()
 
-            correct = torch.eq(pred_thresh,y.unsqueeze(1)).type(torch.cuda.LongTensor)
-            running_correct += torch.count_nonzero(correct).item()
-
+            running_correct += pred.argmax(1).eq(y).sum().item()
             running_samples += len(y)
 
         tp, fp, tn, fn = TP_FP_TN_FN(queries_client, pred_client, true_client)
@@ -110,22 +104,23 @@ def evaluate(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss):
 
     return results, preds, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd
 
-def train(writer, data_name,model_name,classes_per_node,num_nodes,steps,inner_steps,lr,inner_lr,wd,inner_wd, hyper_hid,n_hidden,bs,device,eval_every,alpha,fair):
+def train(writer, embed_dim, data_name,model_name,classes_per_node,num_nodes,steps,inner_steps,lr,inner_lr,wd,inner_wd, hyper_hid,n_hidden,bs,device,eval_every,alpha,fair):
 
-    seed_everything(0)
+    seed_everything(42)
+
+    if embed_dim == -1:
+        logging.info("auto embedding size")
+        embed_dim = int(1 + num_nodes / 4)
 
     nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node)
-
     num_features = len(nodes.features)
 
-    embed_dim = num_features
-
     if model_name == 'NN':
-        hnet = NNHyper(n_nodes=num_nodes, embedding_dim=embed_dim, context_vector_size=num_features, hidden_size=num_features, hnet_hidden_dim = hyper_hid, hnet_n_hidden=n_hidden)
-        model = NN_Context(input_size=num_features, context_vector_size=num_features, context_hidden_size=50, nn_hidden_size=num_features, dropout=.5)
+        hnet = NNHyper(n_nodes=num_nodes, embedding_dim=embed_dim, hidden_size=num_features, hnet_hidden_dim = hyper_hid, hnet_n_hidden=n_hidden)
+        model = NN_Context(input_size=num_features, nn_hidden_size=num_features, dropout=.5)
     if model_name == 'LR':
-        hnet = LRHyper(n_nodes=num_nodes, embedding_dim=embed_dim, context_vector_size=num_features, hidden_size=num_features, device=device, hnet_hidden_dim=hyper_hid, hnet_n_hidden=n_hidden)
-        model = LR_Context(input_size=num_features, context_vector_size=num_features, context_hidden_size=50, nn_hidden_size=num_features)
+        hnet = LRHyper(n_nodes=num_nodes, embedding_dim=embed_dim,  hidden_size=num_features,hnet_hidden_dim=hyper_hid, hnet_n_hidden=n_hidden)
+        model = LR_Context(input_size=num_features, nn_hidden_size=num_features)
 
     device = "cpu"
     if torch.cuda.is_available():
@@ -134,8 +129,12 @@ def train(writer, data_name,model_name,classes_per_node,num_nodes,steps,inner_st
     hnet.to(device)
     model.to(device)
 
-    optimizer = torch.optim.Adam(params=hnet.parameters(), lr=lr, weight_decay=wd)
-    loss = torch.nn.BCEWithLogitsLoss()
+    optimizer = torch.optim.SGD(
+            [
+                {'params': [p for n, p in hnet.named_parameters() if 'embed' not in n]},
+            ], lr=lr, momentum=0.9, weight_decay=wd
+        )
+    loss = torch.nn.CrossEntropyLoss()
 
     if fair == 'none':
         fair_loss = None
@@ -152,15 +151,12 @@ def train(writer, data_name,model_name,classes_per_node,num_nodes,steps,inner_st
         # sample client
         hnet.train()
         node_id = random.choice(range(num_nodes))
-        node_c_i = nodes.c_i[node_id]
 
-        weights = hnet(node_c_i, torch.tensor([node_id], dtype=torch.long).to(device))
-        net_dict = model.state_dict()
-        hnet_dict = {k: v for k, v in weights.items() if k in net_dict}
-        net_dict.update(hnet_dict)
-        model.load_state_dict(net_dict)
+        weights = hnet(torch.tensor([node_id], dtype=torch.long).to(device))
+        model.load_state_dict(weights)
 
-        inner_optim = torch.optim.Adam(model.parameters(), lr=inner_lr, weight_decay=inner_wd)
+        inner_optim = torch.optim.SGD(model.parameters(), lr=inner_lr, momentum=.9, weight_decay=inner_wd)
+
 
         # save starting config
         inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
@@ -170,44 +166,32 @@ def train(writer, data_name,model_name,classes_per_node,num_nodes,steps,inner_st
         # else:
         #     fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=100)
 
-        avg_c_i = []
-        running_fair_loss = []
-
         for j in range(inner_steps):
-            # get new batch
-            batch = next(iter(nodes.train_loaders[node_id]))
-            x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
-            s = x[:,5].to(device)
-
             model.train()
             inner_optim.zero_grad()
             optimizer.zero_grad()
 
+            batch = next(iter(nodes.train_loaders[node_id]))
+            x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
+            s = x[:, 5].to(device)
+
             # train and update local
-            pred, avg_context_vector = model(x, context_only=False)
-            avg_c_i.append(avg_context_vector)
+            pred = model(x)
 
             if fair == 'none':
                 err = loss(pred, y.unsqueeze(1))
             else:
                 fair = fair_loss(x, pred, s, y)
-                running_fair_loss.append(fair.item())
                 err = loss(pred, y.unsqueeze(1)) + fair.to(device)
 
             err.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 50)
             inner_optim.step()
 
-        # c^i average
-        nodes.c_i[node_id] = torch.cuda.FloatTensor([sum(sub_list) / len(sub_list) for sub_list in zip(*avg_c_i)])
-
-        # fair loss average
-        avg_fair_loss = np.mean(running_fair_loss)
 
         # delta theta and global updates
         optimizer.zero_grad()
         final_state = model.state_dict()
-        #delta_theta = OrderedDict({k: inner_state[k] - final_state[k] + avg_fair_loss for k in weights.keys()})
         delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
         hnet_grads = torch.autograd.grad(list(weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values()))
 
@@ -276,32 +260,33 @@ def main():
     parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
     parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
     parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
-    parser.add_argument("--num_steps", type=int, default=2000)
-    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--num_steps", type=int, default=5000)
+    parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
     parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
-    parser.add_argument("--inner_lr", type=float, default=5e-4, help="learning rate for inner optimizer")
-    parser.add_argument("--lr", type=float, default=1e-3, help="learning rate")
-    parser.add_argument("--wd", type=float, default=1e-5, help="weight decay")
-    parser.add_argument("--inner_wd", type=float, default=1e-5, help="inner weight decay")
-    parser.add_argument("--embed_dim", type=int, default=10, help="embedding dim")
+    parser.add_argument("--inner_lr", type=float, default=3e-3, help="learning rate for inner optimizer")
+    parser.add_argument("--lr", type=float, default=1e-4, help="learning rate")
+    parser.add_argument("--wd", type=float, default=1e-6, help="weight decay")
+    parser.add_argument("--inner_wd", type=float, default=1e-6, help="inner weight decay")
+    parser.add_argument("--embed_dim", type=int, default=-1, help="embedding dim")
     parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
     parser.add_argument("--gpu", type=int, default=4, help="gpu device ID")
-    parser.add_argument("--eval_every", type=int, default=50, help="eval every X selected epochs")
+    parser.add_argument("--eval_every", type=int, default=30, help="eval every X selected epochs")
     parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results", help="dir path for output file")
-    parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="dp", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=20, help="fairness/accuracy trade-off parameter")
+    parser.add_argument("--seed", type=int, default=42, help="seed value")
+    parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
+    parser.add_argument("--alpha", type=int, default=10, help="fairness/accuracy trade-off parameter")
     args = parser.parse_args()
     assert args.gpu <= torch.cuda.device_count()
     set_logger()
-
 
     device = get_device(gpus=args.gpu)
 
     args.classes_per_node = 2
 
-    train(writer, data_name=args.data_name,
+    train(writer,
+    embed_dim=args.embed_dim,
+    data_name=args.data_name,
     model_name=args.model_name,
     classes_per_node = args.classes_per_node,
     num_nodes=args.num_nodes,
