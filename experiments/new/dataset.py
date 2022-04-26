@@ -122,33 +122,28 @@ def get_dataset(data_name, num_clients):
         train = clean_and_encode_dataset(read_dataset(TRAIN_DATA_FILE, data_types, 'adult'), 'adult')  #(32561, 14)
         test = clean_and_encode_dataset(read_dataset(TEST_DATA_FILE, data_types, 'adult'), 'adult')    #(16281, 14)
 
-        train_set_1 = train[train['workclass'] == 1]
-        train_set_2 = train[train['workclass'] != 1]
+        train_set_1 = train[train['workclass'] == 1] #2009, 1004 and 1005
+        train_set_2 = train[train['workclass'] != 1] # 24748, 12374 per person
 
-        test_set_1 = test[test['workclass'] == 1]
-        test_set_2 = test[test['workclass'] != 1]
+        test_set_1 = test[test['workclass'] == 1] #1016, 508 per person
+        test_set_2 = test[test['workclass'] != 1] #13034, 6517 per person
 
         cols = train_set_1.columns
 
         features, decision = cols[:-1], cols[-1]
 
-        data_train_1 = TabularData(train_set_1[features].values, train_set_1[decision].valuesr)
-        data_test_1 = TabularData(test_set_1[features].values, test_set_1[decision].values)
+        d_train_g_1 = train_set_1.sample(frac=1).reset_index(drop=True)
+        d_train_g_2 = train_set_2.sample(frac=1).reset_index(drop=True)
+        d_test_g_1 = test_set_1.sample(frac=1).reset_index(drop=True)
+        d_test_g_2 = test_set_2.sample(frac=1).reset_index(drop=True)
 
-        data_train_2 = TabularData(train_set_2[features].values, train_set_2[decision].values)
-        data_test_2 = TabularData(test_set_2[features].values, test_set_2[decision].values)
-
-        train_sets = [train_set_1, train_set_2]
-        test_sets = [test_set_1, test_set_2]
+        train_sets = [d_train_g_1, d_train_g_2]
+        test_sets = [d_test_g_1, d_test_g_2]
 
         d_train_all = pd.concat(train_sets)
         d_test_all = pd.concat(test_sets)
-        data_train_all = TabularData(d_train_all[features].values, d_train_all[decision].values)
-        data_test_all = TabularData(d_test_all[features].values, d_test_all[decision].values)
 
-        all_data = [data_train_1, data_train_2, data_test_1, data_test_2]
-
-        return all_data, features, data_train_all, data_test_all
+        return d_train_all, d_test_all, len(d_train_g_1), len(d_test_g_1), features, decision
 
     elif data_name == 'compas':
         train = clean_and_encode_dataset(read_dataset(None, None, 'compas'), 'compas')

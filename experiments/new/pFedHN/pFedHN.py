@@ -19,8 +19,8 @@ import seaborn as sn
 from fairtorch import DemographicParityLoss, EqualiedOddsLoss
 warnings.filterwarnings("ignore")
 
-def eval_model(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss,confusion=False):
-    curr_results, pred, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd = evaluate(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss)
+def eval_model(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss,confusion, which_position):
+    curr_results, pred, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd = evaluate(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss, which_position)
     total_correct = sum([val['correct'] for val in curr_results.values()])
     total_samples = sum([val['total'] for val in curr_results.values()])
     avg_loss = np.mean([val['loss'] for val in curr_results.values()])
@@ -45,7 +45,7 @@ def eval_model(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss,conf
     return curr_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd
 
 @torch.no_grad()
-def evaluate(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss):
+def evaluate(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss, which_position):
     hnet.eval()
     results = defaultdict(lambda: defaultdict(list))
     preds = []
@@ -64,7 +64,7 @@ def evaluate(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss):
 
         for batch_count, batch in enumerate(curr_data):
             x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
-            s = x[:, 5].to(device)
+            s = x[:, which_position].to(device)
             true_client.extend(y.cpu().numpy())
             queries_client.extend(x.cpu().numpy())
 
@@ -77,14 +77,16 @@ def evaluate(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss):
             pred_client.extend(pred_thresh.flatten().cpu().numpy())
 
             if fair == 'none':
-                running_loss += loss(pred, y).item()
+                running_loss += loss(pred, y.unsqueeze(1)).item()
             else:
-                running_loss += (loss(pred, y) + fair_loss(x, pred, s, y).to(device)).item()
+                running_loss += (loss(pred, y.unsqueeze(1)) + fair_loss(x, pred, s, y).to(device)).item()
 
-            running_correct += pred.argmax(1).eq(y).sum().item()
+            correct = torch.eq(pred_thresh, y.unsqueeze(1)).type(torch.cuda.LongTensor)
+            running_correct += torch.count_nonzero(correct).item()
+
             running_samples += len(y)
 
-        tp, fp, tn, fn = TP_FP_TN_FN(queries_client, pred_client, true_client)
+        tp, fp, tn, fn = TP_FP_TN_FN(queries_client, pred_client, true_client, which_position)
 
         f1_score_prediction, f1_female, f1_male, accuracy, f_acc, m_acc, AOD, EOD, SPD = metrics(tp, fp, tn, fn)
         f1.append(f1_score_prediction)
@@ -104,17 +106,17 @@ def evaluate(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss):
 
     return results, preds, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd
 
-def train(writer, embed_dim, data_name,model_name,classes_per_node,num_nodes,steps,inner_steps,lr,inner_lr,wd,inner_wd, hyper_hid,n_hidden,bs,device,eval_every,alpha,fair):
+def train(writer, embed_dim, data_name,model_name,classes_per_node,num_nodes,steps,inner_steps,lr,inner_lr,wd,inner_wd, hyper_hid,n_hidden,bs, alpha,fair, which_position):
 
-    seed_everything(42)
+    seed_everything(0)
 
     if embed_dim == -1:
         logging.info("auto embedding size")
-        embed_dim = int(1 + num_nodes / 4)
+        #embed_dim = int(1 + num_nodes / 4)
 
     nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node)
     num_features = len(nodes.features)
-
+    embed_dim = num_features
     if model_name == 'NN':
         hnet = NNHyper(n_nodes=num_nodes, embedding_dim=embed_dim, hidden_size=num_features, hnet_hidden_dim = hyper_hid, hnet_n_hidden=n_hidden)
         model = NN_Context(input_size=num_features, nn_hidden_size=num_features, dropout=.5)
@@ -129,12 +131,13 @@ def train(writer, embed_dim, data_name,model_name,classes_per_node,num_nodes,ste
     hnet.to(device)
     model.to(device)
 
-    optimizer = torch.optim.SGD(
-            [
-                {'params': [p for n, p in hnet.named_parameters() if 'embed' not in n]},
-            ], lr=lr, momentum=0.9, weight_decay=wd
-        )
-    loss = torch.nn.CrossEntropyLoss()
+    # optimizer = torch.optim.SGD(
+    #         [
+    #             {'params': [p for n, p in hnet.named_parameters() if 'embed' not in n]},
+    #         ], lr=lr, momentum=0.9, weight_decay=wd
+    #     )
+    optimizer = torch.optim.Adam(params=hnet.parameters(), lr=lr, weight_decay=wd)
+    loss = torch.nn.BCEWithLogitsLoss()
 
     if fair == 'none':
         fair_loss = None
@@ -155,16 +158,16 @@ def train(writer, embed_dim, data_name,model_name,classes_per_node,num_nodes,ste
         weights = hnet(torch.tensor([node_id], dtype=torch.long).to(device))
         model.load_state_dict(weights)
 
-        inner_optim = torch.optim.SGD(model.parameters(), lr=inner_lr, momentum=.9, weight_decay=inner_wd)
-
+        # inner_optim = torch.optim.SGD(model.parameters(), lr=inner_lr, momentum=.9, weight_decay=inner_wd)
+        inner_optim = torch.optim.Adam(model.parameters(), lr=inner_lr, weight_decay=inner_wd)
 
         # save starting config
         inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
 
         # if node_id % 2 == 0:
-        #     fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=10)
+        #     fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=100)
         # else:
-        #     fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=100)
+        #     fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=150)
 
         for j in range(inner_steps):
             model.train()
@@ -173,7 +176,7 @@ def train(writer, embed_dim, data_name,model_name,classes_per_node,num_nodes,ste
 
             batch = next(iter(nodes.train_loaders[node_id]))
             x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
-            s = x[:, 5].to(device)
+            s = x[:, which_position].to(device)
 
             # train and update local
             pred = model(x)
@@ -201,8 +204,8 @@ def train(writer, embed_dim, data_name,model_name,classes_per_node,num_nodes,ste
         torch.nn.utils.clip_grad_norm_(hnet.parameters(), 50)
         optimizer.step()
 
-        if step % 49 == 0 or step == 999 or step == 0:
-            step_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, model, loss, device, confusion=False, fair=fair, fair_loss=fair_loss)
+        if step % 49 == 0 or step == 1999 or step == 0:
+            step_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, model, loss, device, confusion=False, fair=fair, fair_loss=fair_loss, which_position=which_position)
 
             logging.info(f"\nStep: {step + 1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}, Fairness: {fair_loss}")
             writer.add_scalars('testing accuracy', {
@@ -242,7 +245,7 @@ def train(writer, embed_dim, data_name,model_name,classes_per_node,num_nodes,ste
             }, step)
 
 
-    step_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, model, loss, device, confusion=False,fair=fair, fair_loss = fair_loss)
+    step_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, model, loss, device, confusion=False,fair=fair, fair_loss = fair_loss, which_position=which_position)
     logging.info(f"\n\nFinal Results | AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}")
     for i in range(num_nodes):
         print("\nClient", i+1)
@@ -260,8 +263,8 @@ def main():
     parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
     parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
     parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
-    parser.add_argument("--num_steps", type=int, default=5000)
-    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--num_steps", type=int, default=2000)
+    parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
     parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
     parser.add_argument("--inner_lr", type=float, default=3e-3, help="learning rate for inner optimizer")
@@ -273,9 +276,10 @@ def main():
     parser.add_argument("--gpu", type=int, default=4, help="gpu device ID")
     parser.add_argument("--eval_every", type=int, default=30, help="eval every X selected epochs")
     parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results", help="dir path for output file")
-    parser.add_argument("--seed", type=int, default=42, help="seed value")
-    parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=10, help="fairness/accuracy trade-off parameter")
+    parser.add_argument("--seed", type=int, default=0, help="seed value")
+    parser.add_argument("--fair", type=str, default="eo", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
+    parser.add_argument("--alpha", type=int, default=150, help="fairness/accuracy trade-off parameter")
+    parser.add_argument("--which_position", type=int, default=5, choices=[5,8], help="where the sensitive attribute is. 5: compas, 8: adult")
     args = parser.parse_args()
     assert args.gpu <= torch.cuda.device_count()
     set_logger()
@@ -299,10 +303,9 @@ def main():
     hyper_hid = args.hyper_hid,
     n_hidden = args.n_hidden,
     bs = args.batch_size,
-    device = device,
-    eval_every = args.eval_every,
     alpha = args.alpha,
-    fair = args.fair)
+    fair = args.fair,
+    which_position = args.which_position)
 
 if __name__ == "__main__":
     main()

@@ -20,14 +20,14 @@ def set_logger():
         level=logging.INFO
     )
 
-def TP_FP_TN_FN(x, predicted_prediction, labels_pred):
+def TP_FP_TN_FN(x, predicted_prediction, labels_pred, which_position):
     TP = [0, 0, 0] # all, f, m
     FP = [0, 0, 0]
     FN = [0, 0, 0]
     TN = [0, 0, 0]
 
     for i in range(len(x)):
-        if x[i][5].item() == 0:
+        if x[i][8].item() == 0:
             if predicted_prediction[i] == 1 and labels_pred[i] == 1:
                 TP[1] += 1
                 TP[0] += 1

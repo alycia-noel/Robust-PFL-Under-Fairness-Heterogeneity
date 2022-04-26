@@ -49,7 +49,7 @@ class NNHyper(nn.Module):
         return weights
 
 class LRHyper(nn.Module):
-    def __init__(self, n_nodes, embedding_dim, context_vector_size, hidden_size, device, hnet_hidden_dim = 100, hnet_n_hidden=3):
+    def __init__(self, device,n_nodes, embedding_dim, context_vector_size, hidden_size, hnet_hidden_dim = 100, hnet_n_hidden=3):
         super().__init__()
 
         self.n_nodes = n_nodes
