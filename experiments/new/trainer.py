@@ -56,7 +56,7 @@ def evaluate(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss, which
         pred_client = []
         true_client = []
         queries_client = []
-        sensitive_client = []
+
         running_loss, running_correct, running_samples = 0, 0, 0
 
         curr_data = nodes.test_loaders[node_id]
@@ -177,10 +177,10 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
         # save starting config
         inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
 
-        # if node_id % 2 == 0:
-        #     fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=100)
-        # else:
-        #     fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=150)
+        if node_id % 2 == 0:
+            fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=100)
+        else:
+            fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=500)
 
         avg_c_i = []
         running_fair_loss = []
@@ -213,13 +213,9 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
         # c^i average
         nodes.c_i[node_id] = torch.cuda.FloatTensor([sum(sub_list) / len(sub_list) for sub_list in zip(*avg_c_i)])
 
-        # fair loss average
-        avg_fair_loss = np.mean(running_fair_loss)
-
         # delta theta and global updates
         optimizer.zero_grad()
         final_state = model.state_dict()
-        #delta_theta = OrderedDict({k: inner_state[k] - final_state[k] + avg_fair_loss for k in weights.keys()})
         delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
         hnet_grads = torch.autograd.grad(list(weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values()))
 
@@ -302,8 +298,8 @@ def main():
     parser.add_argument("--eval_every", type=int, default=50, help="eval every X selected epochs")
     parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results", help="dir path for output file")
     parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=200, help="fairness/accuracy trade-off parameter")
+    parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
+    parser.add_argument("--alpha", type=int, default=500, help="fairness/accuracy trade-off parameter")
     parser.add_argument("--which_position", type=int, default=8, choices=[5,8], help="which position the sensitive attribute is in. 5: compas, 8: adult")
     args = parser.parse_args()
     assert args.gpu <= torch.cuda.device_count()

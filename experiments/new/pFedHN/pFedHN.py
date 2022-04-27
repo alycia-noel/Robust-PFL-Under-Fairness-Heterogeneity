@@ -164,10 +164,10 @@ def train(writer, embed_dim, data_name,model_name,classes_per_node,num_nodes,ste
         # save starting config
         inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
 
-        # if node_id % 2 == 0:
-        #     fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=100)
-        # else:
-        #     fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=150)
+        if node_id % 2 == 0:
+            fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=100)
+        else:
+            fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=500)
 
         for j in range(inner_steps):
             model.train()
@@ -260,26 +260,26 @@ def main():
 
     parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-    parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
+    parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
     parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
     parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
-    parser.add_argument("--num_steps", type=int, default=2000)
-    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--num_steps", type=int, default=2500)
+    parser.add_argument("--batch_size", type=int, default=512)
     parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
     parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
-    parser.add_argument("--inner_lr", type=float, default=3e-3, help="learning rate for inner optimizer")
+    parser.add_argument("--inner_lr", type=float, default=5e-3, help="learning rate for inner optimizer")
     parser.add_argument("--lr", type=float, default=1e-4, help="learning rate")
-    parser.add_argument("--wd", type=float, default=1e-6, help="weight decay")
-    parser.add_argument("--inner_wd", type=float, default=1e-6, help="inner weight decay")
+    parser.add_argument("--wd", type=float, default=1e-5, help="weight decay")
+    parser.add_argument("--inner_wd", type=float, default=1e-5, help="inner weight decay")
     parser.add_argument("--embed_dim", type=int, default=-1, help="embedding dim")
     parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
     parser.add_argument("--gpu", type=int, default=4, help="gpu device ID")
     parser.add_argument("--eval_every", type=int, default=30, help="eval every X selected epochs")
     parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results", help="dir path for output file")
     parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="eo", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=150, help="fairness/accuracy trade-off parameter")
-    parser.add_argument("--which_position", type=int, default=5, choices=[5,8], help="where the sensitive attribute is. 5: compas, 8: adult")
+    parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
+    parser.add_argument("--alpha", type=int, default=500, help="fairness/accuracy trade-off parameter")
+    parser.add_argument("--which_position", type=int, default=8, choices=[5,8], help="where the sensitive attribute is. 5: compas, 8: adult")
     args = parser.parse_args()
     assert args.gpu <= torch.cuda.device_count()
     set_logger()

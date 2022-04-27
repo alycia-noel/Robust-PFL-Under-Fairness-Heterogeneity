@@ -169,3 +169,14 @@ class NN_Context(nn.Module):
 
         return prediction
 
+class LR(nn.Module):
+    def __init__(self, input_size):
+        super(LR, self).__init__()
+
+        self.input_size = input_size
+        self.fc1 = nn.Linear(self.input_size, 1)
+
+    def forward(self, x):
+        prediction = self.fc1(x)
+
+        return prediction
