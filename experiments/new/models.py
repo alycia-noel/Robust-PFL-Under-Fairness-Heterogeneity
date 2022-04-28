@@ -174,9 +174,34 @@ class LR(nn.Module):
         super(LR, self).__init__()
 
         self.input_size = input_size
-        self.fc1 = nn.Linear(self.input_size, 1)
+
+        self.fc1 = nn.Linear(2*self.input_size, 1)
 
     def forward(self, x):
         prediction = self.fc1(x)
 
         return prediction
+
+class Context(nn.Module):
+    def __init__(self, input_size, context_vector_size, context_hidden_size):
+        super(Context, self).__init__()
+
+        self.input_size = input_size
+        self.context_vector_size = context_vector_size
+        self.context_hidden_size = context_hidden_size
+
+        self.context_net = nn.Sequential(
+            nn.Linear(self.input_size, self.context_hidden_size),
+            nn.BatchNorm1d(self.context_hidden_size),
+            nn.ReLU(),
+            nn.Linear(self.context_hidden_size, self.context_hidden_size),
+            nn.BatchNorm1d(self.context_hidden_size),
+            nn.ReLU(),
+            nn.Linear(self.context_hidden_size, self.context_vector_size)
+        )
+
+    def forward(self, x):
+        context_vector = self.context_net(x)
+        avg_context_vector = torch.mean(context_vector, dim=0)
+
+        return avg_context_vector

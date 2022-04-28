@@ -10,7 +10,7 @@ import torch
 import pandas as pd
 import torch.utils.data
 from tqdm import trange
-from experiments.new.models import NN_Context, NNHyper, LRHyper, LR_Context
+from experiments.new.models import LR, Context, LRHyper
 from experiments.new.node import BaseNodes
 from experiments.new.utils import get_device, seed_everything, set_logger, TP_FP_TN_FN, metrics
 from torch.utils.tensorboard import SummaryWriter
@@ -19,8 +19,8 @@ import seaborn as sn
 from fairtorch import DemographicParityLoss, EqualiedOddsLoss
 warnings.filterwarnings("ignore")
 
-def eval_model(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss,confusion, which_position):
-    curr_results, pred, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd = evaluate(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss, which_position)
+def eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, fair_loss,confusion, which_position):
+    curr_results, pred, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd = evaluate(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, fair_loss, which_position)
     total_correct = sum([val['correct'] for val in curr_results.values()])
     total_samples = sum([val['total'] for val in curr_results.values()])
     avg_loss = np.mean([val['loss'] for val in curr_results.values()])
@@ -45,7 +45,7 @@ def eval_model(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss,conf
     return curr_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd
 
 @torch.no_grad()
-def evaluate(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss, which_position):
+def evaluate(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, fair_loss, which_position):
     hnet.eval()
     results = defaultdict(lambda: defaultdict(list))
     preds = []
@@ -68,14 +68,16 @@ def evaluate(nodes, num_nodes, hnet, model, loss, device, fair, fair_loss, which
             true_client.extend(y.cpu().numpy())
             queries_client.extend(x.cpu().numpy())
 
-            avg_context_vector = model(x.to(device), context_only=True)
+            avg_context_vector = cnet(x)
             weights = hnet(avg_context_vector, torch.tensor([node_id], dtype=torch.long).to(device))
             net_dict = model.state_dict()
             hnet_dict = {k: v for k, v in weights.items() if k in net_dict}
             net_dict.update(hnet_dict)
             model.load_state_dict(net_dict)
 
-            pred, _ = model(x, context_only = False)
+            prediction_vector = avg_context_vector.expand(len(x), num_features)
+            prediction_vector = torch.cat((prediction_vector, x), dim=1)
+            pred = model(prediction_vector)
 
             pred_prob = torch.sigmoid(pred)
             pred_thresh = (pred_prob > 0.5).long()
@@ -121,12 +123,11 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
     embed_dim = num_features
 
-    if model_name == 'NN':
-        hnet = NNHyper(n_nodes=num_nodes, embedding_dim=embed_dim, context_vector_size=num_features, hidden_size=num_features, hnet_hidden_dim = hyper_hid, hnet_n_hidden=n_hidden)
-        model = NN_Context(input_size=num_features, context_vector_size=num_features, context_hidden_size=50, nn_hidden_size=num_features, dropout=.5)
-    if model_name == 'LR':
-        hnet = LRHyper(device=device,n_nodes=num_nodes, embedding_dim=embed_dim, context_vector_size=num_features, hidden_size=num_features, hnet_hidden_dim=hyper_hid, hnet_n_hidden=n_hidden)
-        model = LR_Context(input_size=num_features, context_vector_size=num_features, context_hidden_size=50, nn_hidden_size=num_features)
+    hnet = LRHyper(device=device,n_nodes=num_nodes, embedding_dim=embed_dim, context_vector_size=num_features, hidden_size=num_features, hnet_hidden_dim=hyper_hid, hnet_n_hidden=n_hidden)
+    model = LR(input_size=num_features)
+    cnet = Context(input_size=num_features, context_vector_size=num_features, context_hidden_size=50)
+
+    combo_params = list(model.parameters()) + list(cnet.parameters())
 
     device = "cpu"
     if torch.cuda.is_available():
@@ -134,6 +135,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
     hnet.to(device)
     model.to(device)
+    cnet.to(device)
 
     optimizer = torch.optim.Adam(params=hnet.parameters(), lr=lr, weight_decay=wd)
     loss = torch.nn.BCEWithLogitsLoss()
@@ -154,16 +156,6 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
         hnet.train()
         node_id = random.choice(range(num_nodes))
 
-        # initialize c_i
-        # if step == 0:
-        #     for i in range(num_nodes):
-        #         avg_c = []
-        #         for batch_count, batch in enumerate(nodes.train_loaders[i]):
-        #             x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
-        #             avg_context_vector = model(x.to(device), context_only=True)
-        #             avg_c.append(avg_context_vector)
-        #         nodes.c_i[i] = torch.cuda.FloatTensor([sum(sub_list) / len(sub_list) for sub_list in zip(*avg_c)])
-
         node_c_i = nodes.c_i[node_id]
 
         weights = hnet(node_c_i, torch.tensor([node_id], dtype=torch.long).to(device))
@@ -172,15 +164,15 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
         net_dict.update(hnet_dict)
         model.load_state_dict(net_dict)
 
-        inner_optim = torch.optim.Adam(model.parameters(), lr=inner_lr, weight_decay=inner_wd)
+        inner_optim = torch.optim.Adam(combo_params, lr=inner_lr, weight_decay=inner_wd)
 
         # save starting config
         inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
 
-        if node_id % 2 == 0:
-            fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=100)
-        else:
-            fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=500)
+        # if node_id % 2 == 0:
+        #     fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=100)
+        # else:
+        #     fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=500)
 
         avg_c_i = []
         running_fair_loss = []
@@ -196,7 +188,11 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
             optimizer.zero_grad()
 
             # train and update local
-            pred, avg_context_vector = model(x, context_only=False)
+            avg_context_vector = cnet(x)
+            prediction_vector = avg_context_vector.expand(len(x), num_features)
+            prediction_vector = torch.cat((prediction_vector, x), dim=1)
+
+            pred = model(prediction_vector)
             avg_c_i.append(avg_context_vector)
 
             if fair == 'none':
@@ -226,7 +222,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
         optimizer.step()
 
         if step % 49 == 0 or step == 1999 or step == 0:
-            step_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, model, loss, device, confusion=False, fair=fair, fair_loss=fair_loss, which_position=which_position)
+            step_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, confusion=False, fair=fair, fair_loss=fair_loss, which_position=which_position)
 
             logging.info(f"\nStep: {step + 1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}, Fairness: {fair_loss}")
             writer.add_scalars('testing accuracy', {
@@ -266,7 +262,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
             }, step)
 
 
-    step_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, model, loss, device, confusion=False,fair=fair, fair_loss = fair_loss, which_position=which_position)
+    step_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, confusion=False,fair=fair, fair_loss = fair_loss, which_position=which_position)
     logging.info(f"\n\nFinal Results | AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}")
     for i in range(num_nodes):
         print("\nClient", i+1)
@@ -281,15 +277,15 @@ def main():
 
     parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-    parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
+    parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
     parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
     parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
-    parser.add_argument("--num_steps", type=int, default=2500)
-    parser.add_argument("--batch_size", type=int, default=512)
+    parser.add_argument("--num_steps", type=int, default=2000)
+    parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
     parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
-    parser.add_argument("--inner_lr", type=float, default=5e-3, help="learning rate for inner optimizer")
-    parser.add_argument("--lr", type=float, default=1e-4, help="learning rate")
+    parser.add_argument("--inner_lr", type=float, default=7e-3, help="learning rate for inner optimizer")
+    parser.add_argument("--lr", type=float, default=5e-4, help="learning rate")
     parser.add_argument("--wd", type=float, default=1e-5, help="weight decay")
     parser.add_argument("--inner_wd", type=float, default=1e-5, help="inner weight decay")
     parser.add_argument("--embed_dim", type=int, default=10, help="embedding dim")
@@ -298,9 +294,9 @@ def main():
     parser.add_argument("--eval_every", type=int, default=50, help="eval every X selected epochs")
     parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results", help="dir path for output file")
     parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
+    parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
     parser.add_argument("--alpha", type=int, default=500, help="fairness/accuracy trade-off parameter")
-    parser.add_argument("--which_position", type=int, default=8, choices=[5,8], help="which position the sensitive attribute is in. 5: compas, 8: adult")
+    parser.add_argument("--which_position", type=int, default=5, choices=[5,8], help="which position the sensitive attribute is in. 5: compas, 8: adult")
     args = parser.parse_args()
     assert args.gpu <= torch.cuda.device_count()
     set_logger()
