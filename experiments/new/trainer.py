@@ -15,9 +15,40 @@ from experiments.new.node import BaseNodes
 from experiments.new.utils import get_device, seed_everything, set_logger, TP_FP_TN_FN, metrics
 from torch.utils.tensorboard import SummaryWriter
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import seaborn as sn
 from fairtorch import DemographicParityLoss, EqualiedOddsLoss
 warnings.filterwarnings("ignore")
+
+
+def plot_grad_flow(named_parameters):
+    '''Plots the gradients flowing through different layers in the net during training.
+    Can be used for checking for possible gradient vanishing / exploding problems.
+
+    Usage: Plug this function in Trainer class after loss.backwards() as
+    "plot_grad_flow(self.model.named_parameters())" to visualize the gradient flow'''
+    ave_grads = []
+    max_grads = []
+    layers = []
+    for n, p in named_parameters:
+        if (p.requires_grad) and ("bias" not in n):
+            layers.append(n)
+            ave_grads.append(p.grad.abs().mean().cpu())
+            max_grads.append(p.grad.abs().max().cpu())
+    plt.bar(np.arange(len(max_grads)), max_grads, alpha=0.1, lw=1, color="c")
+    plt.bar(np.arange(len(max_grads)), ave_grads, alpha=0.1, lw=1, color="b")
+    plt.hlines(0, 0, len(ave_grads) + 1, lw=2, color="k")
+    plt.xticks(range(0, len(ave_grads), 1), layers, rotation="vertical")
+    plt.xlim(left=0, right=len(ave_grads))
+    plt.ylim(bottom=-0.001, top=0.02)
+    plt.xlabel("Layers")
+    plt.ylabel("average gradient")
+    plt.title("Gradient flow")
+    plt.grid(True)
+    plt.legend([Line2D([0], [0], color="c", lw=4),
+                Line2D([0], [0], color="b", lw=4),
+                Line2D([0], [0], color="k", lw=4)], ['max-gradient', 'mean-gradient', 'zero-gradient'])
+    plt.show()
 
 def eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, fair_loss,confusion, which_position):
     curr_results, pred, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd = evaluate(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, fair_loss, which_position)
@@ -70,10 +101,7 @@ def evaluate(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fa
 
             avg_context_vector = cnet(x)
             weights = hnet(avg_context_vector, torch.tensor([node_id], dtype=torch.long).to(device))
-            net_dict = model.state_dict()
-            hnet_dict = {k: v for k, v in weights.items() if k in net_dict}
-            net_dict.update(hnet_dict)
-            model.load_state_dict(net_dict)
+            model.load_state_dict(weights)
 
             prediction_vector = avg_context_vector.expand(len(x), num_features)
             prediction_vector = torch.cat((prediction_vector, x), dim=1)
@@ -152,33 +180,27 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
     step_iter = trange(steps)
 
     for step in step_iter:
-        # sample client
         hnet.train()
         node_id = random.choice(range(num_nodes))
 
         node_c_i = nodes.c_i[node_id]
 
         weights = hnet(node_c_i, torch.tensor([node_id], dtype=torch.long).to(device))
-        net_dict = model.state_dict()
-        hnet_dict = {k: v for k, v in weights.items() if k in net_dict}
-        net_dict.update(hnet_dict)
-        model.load_state_dict(net_dict)
+        model.load_state_dict(weights)
 
         inner_optim = torch.optim.Adam(combo_params, lr=inner_lr, weight_decay=inner_wd)
 
-        # save starting config
         inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
 
-        # if node_id % 2 == 0:
-        #     fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=100)
-        # else:
-        #     fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=500)
+        if node_id % 2 == 0:
+            fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=100)
+        else:
+            fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=150)
 
         avg_c_i = []
         running_fair_loss = []
 
         for j in range(inner_steps):
-            # get new batch
             batch = next(iter(nodes.train_loaders[node_id]))
             x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
             s = x[:,which_position].to(device)
@@ -187,7 +209,6 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
             inner_optim.zero_grad()
             optimizer.zero_grad()
 
-            # train and update local
             avg_context_vector = cnet(x)
             prediction_vector = avg_context_vector.expand(len(x), num_features)
             prediction_vector = torch.cat((prediction_vector, x), dim=1)
@@ -198,18 +219,20 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
             if fair == 'none':
                 err = loss(pred, y.unsqueeze(1))
             else:
-                fair = fair_loss(x, pred, s, y)
-                running_fair_loss.append(fair.item())
-                err = loss(pred, y.unsqueeze(1)) + fair.to(device)
+                fair_l = fair_loss(x, pred, s, y)
+                running_fair_loss.append(fair_l.item())
+                err = loss(pred, y.unsqueeze(1)) + fair_l.to(device)
 
             err.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 50)
+
+            # plot_grad_flow(model.named_parameters())
+            # plot_grad_flow(cnet.named_parameters())
+
+            #torch.nn.utils.clip_grad_norm_(model.parameters(), 50)
             inner_optim.step()
 
-        # c^i average
         nodes.c_i[node_id] = torch.cuda.FloatTensor([sum(sub_list) / len(sub_list) for sub_list in zip(*avg_c_i)])
 
-        # delta theta and global updates
         optimizer.zero_grad()
         final_state = model.state_dict()
         delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
@@ -218,7 +241,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
         for p, g in zip(hnet.parameters(), hnet_grads):
             p.grad = g
 
-        torch.nn.utils.clip_grad_norm_(hnet.parameters(), 50)
+        #torch.nn.utils.clip_grad_norm_(hnet.parameters(), 50)
         optimizer.step()
 
         if step % 49 == 0 or step == 1999 or step == 0:
@@ -284,18 +307,18 @@ def main():
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
     parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
-    parser.add_argument("--inner_lr", type=float, default=7e-3, help="learning rate for inner optimizer")
-    parser.add_argument("--lr", type=float, default=5e-4, help="learning rate")
+    parser.add_argument("--inner_lr", type=float, default=1e-3, help="learning rate for inner optimizer")
+    parser.add_argument("--lr", type=float, default=1e-4, help="learning rate")
     parser.add_argument("--wd", type=float, default=1e-5, help="weight decay")
-    parser.add_argument("--inner_wd", type=float, default=1e-5, help="inner weight decay")
+    parser.add_argument("--inner_wd", type=float, default=1e-7, help="inner weight decay")
     parser.add_argument("--embed_dim", type=int, default=10, help="embedding dim")
     parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
     parser.add_argument("--gpu", type=int, default=4, help="gpu device ID")
     parser.add_argument("--eval_every", type=int, default=50, help="eval every X selected epochs")
     parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results", help="dir path for output file")
     parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=500, help="fairness/accuracy trade-off parameter")
+    parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
+    parser.add_argument("--alpha", type=int, default=150, help="fairness/accuracy trade-off parameter")
     parser.add_argument("--which_position", type=int, default=5, choices=[5,8], help="which position the sensitive attribute is in. 5: compas, 8: adult")
     args = parser.parse_args()
     assert args.gpu <= torch.cuda.device_count()

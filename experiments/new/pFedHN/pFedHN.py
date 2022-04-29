@@ -164,10 +164,10 @@ def train(writer, embed_dim, data_name,model_name,classes_per_node,num_nodes,ste
         # save starting config
         inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
 
-        if node_id % 2 == 0:
-            fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=100)
-        else:
-            fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=500)
+        # if node_id % 2 == 0:
+        #     fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=100)
+        # else:
+        #     fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=250)
 
         for j in range(inner_steps):
             model.train()
@@ -277,8 +277,8 @@ def main():
     parser.add_argument("--eval_every", type=int, default=30, help="eval every X selected epochs")
     parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results", help="dir path for output file")
     parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=500, help="fairness/accuracy trade-off parameter")
+    parser.add_argument("--fair", type=str, default="eo", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
+    parser.add_argument("--alpha", type=int, default=250, help="fairness/accuracy trade-off parameter")
     parser.add_argument("--which_position", type=int, default=8, choices=[5,8], help="where the sensitive attribute is. 5: compas, 8: adult")
     args = parser.parse_args()
     assert args.gpu <= torch.cuda.device_count()

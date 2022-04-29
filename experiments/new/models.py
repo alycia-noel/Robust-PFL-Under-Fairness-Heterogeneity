@@ -182,6 +182,19 @@ class LR(nn.Module):
 
         return prediction
 
+class LR_plain(nn.Module):
+    def __init__(self, input_size):
+        super(LR_plain, self).__init__()
+
+        self.input_size = input_size
+
+        self.fc1 = nn.Linear(self.input_size, 1)
+
+    def forward(self, x):
+        prediction = self.fc1(x)
+
+        return prediction
+
 class Context(nn.Module):
     def __init__(self, input_size, context_vector_size, context_hidden_size):
         super(Context, self).__init__()
@@ -190,18 +203,17 @@ class Context(nn.Module):
         self.context_vector_size = context_vector_size
         self.context_hidden_size = context_hidden_size
 
-        self.context_net = nn.Sequential(
-            nn.Linear(self.input_size, self.context_hidden_size),
-            nn.BatchNorm1d(self.context_hidden_size),
-            nn.ReLU(),
-            nn.Linear(self.context_hidden_size, self.context_hidden_size),
-            nn.BatchNorm1d(self.context_hidden_size),
-            nn.ReLU(),
-            nn.Linear(self.context_hidden_size, self.context_vector_size)
-        )
+        self.fc1 = nn.Linear(self.input_size, self.context_hidden_size)
+        self.fc2 = nn.Linear(self.context_hidden_size, self.context_hidden_size)
+        self.fc3 = nn.Linear(self.context_hidden_size, self.context_vector_size)
+        self.bn1 = nn.BatchNorm1d(self.context_hidden_size)
+        self.bn2 = nn.BatchNorm1d(self.context_hidden_size)
+        self.relu = nn.ReLU()
 
     def forward(self, x):
-        context_vector = self.context_net(x)
+        x = self.relu(self.bn1(self.fc1(x)))
+        x = self.relu(self.bn2(self.fc2(x)))
+        context_vector = self.fc3(x)
         avg_context_vector = torch.mean(context_vector, dim=0)
 
         return avg_context_vector
