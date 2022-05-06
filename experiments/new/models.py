@@ -169,19 +169,6 @@ class NN_Context(nn.Module):
 
         return prediction
 
-class LR(nn.Module):
-    def __init__(self, input_size):
-        super(LR, self).__init__()
-
-        self.input_size = input_size
-
-        self.fc1 = nn.Linear(2*self.input_size, 1)
-
-    def forward(self, x):
-        prediction = self.fc1(x)
-
-        return prediction
-
 class LR_plain(nn.Module):
     def __init__(self, input_size):
         super(LR_plain, self).__init__()
@@ -194,6 +181,53 @@ class LR_plain(nn.Module):
         prediction = self.fc1(x)
 
         return prediction
+
+class LR(nn.Module):
+    def __init__(self, input_size, bound):
+        super(LR, self).__init__()
+
+        self.bound = torch.Tensor([bound])
+        self.sensitive_classes = [0, 1]
+        self.input_size = input_size
+        self.n_constraints = 4 # 2 * num classes
+        self.dim_condition = 3 # num_classes + 1
+        self.M = torch.zeros((self.n_constraints, self.dim_condition))
+        self.fc1 = nn.Linear(2*self.input_size, 1)
+
+        for i in range(self.n_constraints):
+            j = i % 2
+            if j == 0:
+                self.M[i, j] = 1.0
+                self.M[i, -1] = -1.0
+            else:
+                self.M[i, j - 1] = -1.0
+                self.M[i, -1] = 1.0
+
+    def mu_q(self, pred, sensitive):
+        sensitive = sensitive.view(pred.shape) #nan occurs when all 1
+        all_false_train = torch.zeros((32,))
+        all_false_test = torch.zeros((22,))
+        expected_values_list = []
+        for v in self.sensitive_classes:
+            idx_true = sensitive == v
+
+            if torch.equal(idx_true.type(torch.FloatTensor).flatten(), all_false_train) or torch.equal(idx_true.type(torch.FloatTensor).flatten(), all_false_test):
+                expected_values_list.append(pred.mean()*0)
+            else:
+                expected_values_list.append(pred[idx_true].mean())
+        expected_values_list.append(pred.mean())
+
+        return torch.stack(expected_values_list)
+
+    def M_mu_q(self, pred, sensitive):
+        return torch.mv(self.M.to(pred.device), self.mu_q(pred, sensitive) - self.bound.to(pred.device))
+
+    def forward(self, x, s):
+        prediction = self.fc1(x)
+
+        m_mu_q = self.M_mu_q(prediction, s)
+
+        return prediction, m_mu_q
 
 class Context(nn.Module):
     def __init__(self, input_size, context_vector_size, context_hidden_size):
@@ -210,10 +244,33 @@ class Context(nn.Module):
         self.bn2 = nn.BatchNorm1d(self.context_hidden_size)
         self.relu = nn.ReLU()
 
-    def forward(self, x):
-        x = self.relu(self.bn1(self.fc1(x)))
-        x = self.relu(self.bn2(self.fc2(x)))
-        context_vector = self.fc3(x)
+    def forward(self, x, num_features):
+        x_ = self.relu(self.bn1(self.fc1(x)))
+        x_ = self.relu(self.bn2(self.fc2(x_)))
+        context_vector = self.fc3(x_)
         avg_context_vector = torch.mean(context_vector, dim=0)
 
-        return avg_context_vector
+        prediction_vector = avg_context_vector.expand(len(x), num_features)
+        pred_vec = torch.cat((prediction_vector, x), dim=1)
+
+
+        return avg_context_vector, pred_vec
+
+class Constraint(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.register_parameter(name='lmbda', param=torch.nn.Parameter(torch.rand((4,1))))
+
+    def forward(self, value):
+        with torch.no_grad():
+            self.lmbda.data = self.lmbda.data.clamp(min=0, max=10000000000)
+
+        for i, lm in enumerate(self.lmbda.data):
+            if lm.item() < 0:
+                print(lm.item())
+                exit(1)
+
+        loss = torch.matmul(self.lmbda.T, value )
+
+        return loss

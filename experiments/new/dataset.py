@@ -158,6 +158,7 @@ def get_dataset(data_name, num_clients):
         d_train_g_1, d_test_g_1 = train_test_split(client_1, test_size=300)
         d_train_g_2, d_test_g_2 = train_test_split(client_2, test_size=300)
 
+
         d_train_g_1 = d_train_g_1.sample(frac=1).reset_index(drop=True)
         d_train_g_2 = d_train_g_2.sample(frac=1).reset_index(drop=True)
         d_test_g_1 = d_test_g_1.sample(frac=1).reset_index(drop=True)
@@ -170,7 +171,7 @@ def get_dataset(data_name, num_clients):
         d_test_all = pd.concat(test_sets)
 
 
-    return d_train_all, d_test_all, len(d_train_g_1), len(d_test_g_1), features, decision
+    return d_train_all, d_test_all, len(d_train_g_1), len(d_test_g_1), len(d_train_g_2), len(d_test_g_2), features, decision
 
 
 def gen_random_loaders(data_name, num_users, bz, classes_per_user):
@@ -178,38 +179,44 @@ def gen_random_loaders(data_name, num_users, bz, classes_per_user):
 
     dataloaders = []
 
-    group_all_train_data, group_all_test_data, len_d_train_g_1, len_d_test_g_1, features, decision = get_dataset(data_name, num_users)
+    group_all_train_data, group_all_test_data, len_d_train_g_1, len_d_test_g_1, len_d_train_g_2, len_d_test_g_2, features, decision = get_dataset(data_name, num_users)
 
     datasets = [group_all_train_data, group_all_test_data]
 
 
     for i, d in enumerate(datasets):
         usr_subset_idx = [[] for i in range(num_users)]
-        data_copy = d
-        if i == 0:
-            for usr_i in range(num_users):
-                if usr_i == 0 or usr_i == 1:
-                    end_idx = int(len_d_train_g_1/ 2)
-                if usr_i == 2 or usr_i == 3:
-                    end_idx = int(len(data_copy) / 2)
 
-                usr_subset_idx[usr_i].extend(TabularData(data_copy[:end_idx][features].values, data_copy[:end_idx][decision].values))
-                data_copy = data_copy[end_idx:]
+        if i == 0: # Train
+            for usr_i in range(num_users):
+                if usr_i == 0:
+                    usr_subset_idx[usr_i].extend(TabularData(d[0:int(len_d_train_g_1/2)][features].values, d[0:int(len_d_train_g_1/2)][decision].values))
+                elif usr_i == 1:
+                    usr_subset_idx[usr_i].extend(TabularData(d[int(len_d_train_g_1/2):len_d_train_g_1][features].values, d[int(len_d_train_g_1/2):len_d_train_g_1][decision].values))
+                elif usr_i == 2:
+                    usr_subset_idx[usr_i].extend(TabularData(d[len_d_train_g_1: (len_d_train_g_1 + int(len_d_train_g_2/2))][features].values, d[len_d_train_g_1: (len_d_train_g_1 + int(len_d_train_g_2/2))][decision].values))
+                elif usr_i == 3:
+                    usr_subset_idx[usr_i].extend(TabularData(d[len_d_train_g_1 +int(len_d_train_g_2/2):][features].values, d[int(len_d_train_g_1 +len_d_train_g_2/2):][decision].values))
 
             subsets = list(usr_subset_idx)
             loader_params['shuffle'] = True
             dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params), subsets)))
 
-        elif i == 1:
+        elif i == 1: # Test
             for usr_i in range(num_users):
-                if usr_i == 0 or usr_i == 1:
-                    end_idx = int(len_d_test_g_1 / 2)
-                if usr_i == 2 or usr_i == 3:
-                    end_idx = int(len(data_copy) / 2)
-
-                usr_subset_idx[usr_i].extend(
-                    TabularData(data_copy[:end_idx][features].values, data_copy[:end_idx][decision].values))
-                data_copy = data_copy[end_idx:]
+                if usr_i == 0:
+                    usr_subset_idx[usr_i].extend(TabularData(d[0:int(len_d_test_g_1 / 2)][features].values,
+                                                             d[0:int(len_d_test_g_1 / 2)][decision].values))
+                elif usr_i == 1:
+                    usr_subset_idx[usr_i].extend(
+                        TabularData(d[int(len_d_test_g_1 / 2):len_d_test_g_1][features].values,
+                                    d[int(len_d_test_g_1 / 2):len_d_test_g_1][decision].values))
+                elif usr_i == 2:
+                    usr_subset_idx[usr_i].extend(
+                        TabularData(d[len_d_test_g_1: (len_d_test_g_1 + int(len_d_test_g_2 / 2))][features].values,
+                                    d[len_d_test_g_1: (len_d_test_g_1 + int(len_d_test_g_2 / 2))][decision].values))
+                elif usr_i == 3:
+                    usr_subset_idx[usr_i].extend(TabularData(d[len_d_test_g_1 + int(len_d_test_g_2 / 2):][features].values,d[int(len_d_test_g_1 + len_d_test_g_2 / 2):][decision].values))
 
             subsets = list(usr_subset_idx)
 
