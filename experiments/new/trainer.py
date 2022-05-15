@@ -19,8 +19,6 @@ import seaborn as sn
 from fairtorch import DemographicParityLoss, EqualiedOddsLoss
 warnings.filterwarnings("ignore")
 
-
-torch.autograd.set_detect_anomaly(True)
 def eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, confusion, which_position):
     curr_results, pred, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd = evaluate(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, which_position)
     total_correct = sum([val['correct'] for val in curr_results.values()])
@@ -140,7 +138,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
     optimizer = torch.optim.Adam(params=hnet.parameters(), lr=lr, weight_decay=wd)
     loss = torch.nn.BCEWithLogitsLoss()
-
+    client_optimizers = [torch.optim.Adam(combo_params, lr=inner_lr, weight_decay=inner_wd) for i in range(num_nodes)]
 
     # if fair == 'none':
     #     fair_loss = None
@@ -162,7 +160,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
         weights = hnet(node_c_i, torch.tensor([node_id], dtype=torch.long).to(device))
         model.load_state_dict(weights)
 
-        inner_optim = torch.optim.Adam(combo_params, lr=inner_lr, weight_decay=inner_wd)
+        inner_optim = client_optimizers[node_id]
 
         inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
 
