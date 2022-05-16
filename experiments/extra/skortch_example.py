@@ -1,29 +1,20 @@
 import copy
-
-import fairlearn.datasets
 import os
 import torch
 import warnings
 from torch import nn
 import torch.optim as optim
-import torch.nn.functional as F
 import numpy as np
 import pandas as pd
-from sklearn.base import ClassifierMixin
 from collections import OrderedDict
-from torch.utils.data import Dataset
-from experiments.new.node import BaseNodes
-from sklearn.datasets import make_classification
 from skorch import NeuralNetClassifier
-from skorch.callbacks import EpochScoring
-from fairlearn.reductions import GridSearch
-from fairlearn.reductions import DemographicParity
+from fairlearn.reductions import ExponentiatedGradient, DemographicParity, EqualizedOdds
 import matplotlib.pyplot as plt
-from sklearn.linear_model import LogisticRegression
 warnings.filterwarnings("ignore")
 from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import train_test_split
-
+from fairlearn.metrics import MetricFrame, mean_prediction, selection_rate, demographic_parity_difference, demographic_parity_ratio, true_negative_rate, true_positive_rate, false_negative_rate, false_positive_rate, equalized_odds_difference
+from sklearn.metrics import balanced_accuracy_score, roc_auc_score
+from sklearn.calibration import CalibratedClassifierCV
 
 class LR(nn.Module):
     def __init__(self, input_size):
@@ -36,6 +27,8 @@ class LR(nn.Module):
         )
 
     def forward(self, X, **kwargs):
+        # this is where we can call the context vector
+        # i.e., get context, concat with x, then call self.model(x)
         return self.model(X)
 
 
@@ -43,7 +36,12 @@ class SampleWeightLR(NeuralNetClassifier):
     def __init__(self, *args, criterion__reduce=False, **kwargs):
         super().__init__(*args, criterion__reduce=criterion__reduce, **kwargs)
 
+
+    #need to alter fit loop here to get collection of context vectors and we can update the hnet here as well
+    # need run single epoch
+
     def fit(self, X, y, sample_weight=None):
+        #
         if isinstance(X, (pd.DataFrame, pd.Series)):
             X = X.to_numpy().astype("float32")
         if isinstance(y, (pd.DataFrame, pd.Series)):
@@ -58,9 +56,15 @@ class SampleWeightLR(NeuralNetClassifier):
             sample_weight if sample_weight is not None else np.ones_like(y)
         )
         X = {"X": X, "sample_weight": sample_weight}
+
         return super().fit(X, y)
 
     def predict(self, X):
+        #here we need to get updated network param from HNET using context
+        # 1. get context
+        # 2. get param from hnet
+        # 3. instantiate params
+        # 4. classify
         if isinstance(X, (pd.DataFrame, pd.Series)):
             X = X.to_numpy().astype("float32")
         return(super().predict_proba(X) > 0.5).astype(float)
@@ -74,13 +78,13 @@ class SampleWeightLR(NeuralNetClassifier):
         loss_reduced = (sample_weight * loss_unreduced).mean()
         return loss_reduced
 
-    def get_params(self, deep=True, **kwargs):
-        params = []
-
-        for name, param in self.module_.named_parameters():
-            params.append(param.cpu().detach().numpy().flatten())
-
-        return params
+    # def get_params(self, deep=True, **kwargs):
+    #     params = []
+    #
+    #     for name, param in self.module_.named_parameters():
+    #         params.append(param.cpu().detach().numpy().flatten())
+    #
+    #     return params
 
 
 def plot_data(Xs, Ys):
@@ -103,6 +107,28 @@ torch.cuda.manual_seed(0)
 CURRENT_DIR = os.path.abspath(os.path.dirname(__name__))
 TRAIN_DATA_FILE = os.path.join(CURRENT_DIR, 'adult.data')
 TEST_DATA_FILE = os.path.join(CURRENT_DIR, 'adult.test')
+
+def get_metrics_df(models_dict, y_true, group):
+    metrics_dict = {
+        "Overall selection rate": (lambda x: selection_rate(y_true, x)),
+        "Demographic parity difference": (lambda x: demographic_parity_difference(y_true, x, sensitive_features=group)),
+        "Demographic parity ratio": (lambda x: demographic_parity_ratio(y_true, x, sensitive_features=group)),
+        "------": (lambda x: ""),
+        "Overall balanced error rate": (lambda x: 1-balanced_accuracy_score(y_true, x)),
+        "Balanced error rate difference": (lambda x: MetricFrame(metrics=balanced_accuracy_score, y_true=y_true, y_pred=x, sensitive_features=group).difference(method='between_groups')),
+        " ------": (lambda x: ""),
+        "Equalized odds difference": ( lambda x: equalized_odds_difference(y_true, x, sensitive_features=group)),
+        "  ------": (lambda x: "")
+    }
+    df_dict = {}
+    for metric_name, metric_func in metrics_dict.items():
+        df_dict[metric_name] = [metric_func(preds) for model_name, preds in models_dict.items()]
+    return pd.DataFrame.from_dict(df_dict, orient="index", columns=models_dict.keys())
+
+def summary_as_df(name, summary):
+    a = summary.by_group
+    a['overall'] = summary.overall
+    return pd.DataFrame({name: a})
 
 def get_data(path):
     data_types = OrderedDict([
@@ -149,83 +175,93 @@ def get_data(path):
     data.capital_gain = data.capital_gain.astype(int)
 
     data.replace(['Divorced', 'Married-AF-spouse', 'Married-civ-spouse', 'Married-spouse-absent', 'Never-married', 'Separated', 'Widowed'], ['not married', 'married', 'married', 'married', 'not married', 'not married', 'not married'], inplace = True)
+    data.replace(['Federal-gov', 'Local-gov', 'State-gov'], ['government', 'government', 'government'], inplace = True)
+    data.replace(['Never-worked', 'Private', 'Self-emp-inc', 'Self-emp-not-inc', 'Without-pay'], ['private', 'private', 'private', 'private', 'private'], inplace=True)
     encoders = {}
+
     for col in ['workclass', 'education', 'marital_status', 'occupation', 'relationship', 'race', 'sex', 'native_country', 'income_class']:
         encoders[col] = LabelEncoder().fit(data[col])
         data.loc[:, col] = encoders[col].transform(data[col])
 
     return data
 
-# To get parameters: net.coef_, to get bias: net.intercept_[:,None]
+mf = []
+roc = []
+metrics = []
+auc_sel = []
 
 train_data = get_data(TRAIN_DATA_FILE)
 test_data  = get_data(TEST_DATA_FILE)
 
+num_clients = 4
+first_set = 2
+second_set = 2
+
+train_data = train_data.sort_values('workclass').reset_index(drop=True)
+split = train_data.index[np.searchsorted(train_data['workclass'], 1)]
+data_copy_train = train_data
+data_copy_test = test_data
+datasets = [data_copy_train, data_copy_test]
+all_client_test_train, all_client_train, all_client_test = [[],[]], [], []
+
+for j, data_copy in enumerate(datasets):
+    amount_two = int((data_copy.shape[0] - split) / second_set)
+
+    for i in range(num_clients):
+        if i < first_set:
+            amount = int((split-1) / first_set)
+        else:
+            amount = amount_two
+
+        if i == num_clients - 1:
+            client_data = data_copy
+        else:
+            client_data = data_copy[0:amount]
+
+        all_client_test_train[j].append(client_data)
+        data_copy = data_copy[amount:]
+
+
 cols = train_data.columns
-features, label = cols[:-1], cols[-1]
-X, Y = train_data[features].to_numpy(dtype='f'), train_data[label].to_numpy(dtype='f')
-X_test, Y_test = test_data[features].to_numpy(dtype='f'), test_data[label].to_numpy(dtype='f')
+features_xa, features_x, label = cols[:-1], cols[:-2], cols[-1]
 
-net = SampleWeightLR(LR(X.shape[1]), max_epochs=5, optimizer=optim.Adam, lr=.001, batch_size=32, train_split=None, iterator_train__shuffle=True, criterion=nn.BCELoss, device=device)
-moment=DemographicParity()
+all_client_train, all_client_test = all_client_test_train
 
-verification_moment = copy.deepcopy(moment)
-unmitigated = copy.deepcopy(net)
-# unmitigated.fit(X, Y)
+for j in range(num_clients):
+    print("Training client:", j+1)
+    net = SampleWeightLR(LR(len(features_xa)), max_epochs=25 , optimizer=optim.Adam, lr=.001, batch_size=32, train_split=None, iterator_train__shuffle=True, criterion=nn.BCELoss, device=device)
+    expgrad_xa = ExponentiatedGradient(net, constraints=DemographicParity(difference_bound=.01), eps=0.05, nu=1e-6)
 
-num_predictors = 2
+    expgrad_xa.fit(all_client_train[j][features_xa], all_client_train[j][label], sensitive_features=all_client_train[j]['sex'])
 
-first_sweep=GridSearch(net, constraints=moment, grid_size=num_predictors)
-first_sweep.fit(X, Y, sensitive_features=X[:,8])
+    scores_expgrad_xa = pd.Series(expgrad_xa.predict(all_client_test[j][features_xa]), name="scores_expgrad_xa")
 
-lambda_vecs = first_sweep.lambda_vecs_
-print(lambda_vecs[0])
-actual_multipliers = [lambda_vecs[col][("+", "all", 1)]-lambda_vecs[col][("-", "all", 1)] for col in lambda_vecs]
-print(actual_multipliers)
+    metric_frame_auc = MetricFrame(metrics=roc_auc_score, y_true=all_client_test[j][label], y_pred=scores_expgrad_xa, sensitive_features=all_client_test[j]['sex'])
+    metric_frame_mean = MetricFrame(metrics=mean_prediction, y_true=all_client_test[j][label], y_pred=scores_expgrad_xa, sensitive_features=all_client_test[j]['sex'])
+    auc = summary_as_df("auc", metric_frame_auc)
+    sel = summary_as_df("selection", metric_frame_mean)
 
-lambda_best = first_sweep.lambda_vecs_[first_sweep.best_idx_][("+", "all", 1)] - first_sweep.lambda_vecs_[first_sweep.best_idx_][("-", "all", 1)]
-print("lambda_best =", lambda_best)
-print("coefficients =", first_sweep.predictors_[first_sweep.best_idx_].get_params())
-Y_first_predict = first_sweep.predict(X_test)
+    auc.loc['disparity'] = '-'
+    sel.loc['disparity'] = (sel.loc[1] - sel.loc[0]).abs()
 
-second_sweep_multipliers = np.linspace(lambda_best - 0.5, lambda_best + 0.5, 10) #31
+    mf.append( MetricFrame({
+        'TPR': true_positive_rate,
+        'FPR': false_positive_rate,
+        'TNR': true_negative_rate,
+        'FNR': false_negative_rate},
+        all_client_test[j][label], scores_expgrad_xa, sensitive_features=all_client_test[j]['sex']))
 
-iterables = [['+', '-'], ['all'], [0, 1]]
-midx = pd.MultiIndex.from_product(iterables, names=['sign', 'event', 'group_id'])
+    models_dict = {'expgrad': (scores_expgrad_xa)}
+    roc.append(roc_auc_score(all_client_train[j][label], expgrad_xa.predict(all_client_train[j][features_xa])))
+    metrics.append(get_metrics_df(models_dict, all_client_test[j][label], all_client_test[j]['sex']))
+    auc_sel.append(pd.concat([auc, sel], axis=1))
 
-second_sweep_lambdas = []
-for l in second_sweep_multipliers:
-    nxt = pd.Series(np.zeros(4), index=midx)
-    if l < 0:
-        nxt[("-", "all", 1)] = abs(l)
-    else:
-        nxt[("+", "all", 1)] = l
-    second_sweep_lambdas.append(nxt)
-
-multiplier_df = pd.concat(second_sweep_lambdas, axis=1)
-second_sweep=GridSearch(net, constraints=DemographicParity(), grid_size=num_predictors, grid=multiplier_df)
-
-second_sweep.fit(X, Y, sensitive_features=X[:,8])
-lambda_best_second = second_sweep.lambda_vecs_[second_sweep.best_idx_][("+", "all", 1)] \
-                     -second_sweep.lambda_vecs_[second_sweep.best_idx_][("-", "all", 1)]
-print("lambda_best =", lambda_best_second)
-print("coefficients =", second_sweep.predictors_[second_sweep.best_idx_].get_params())
-Y_second_predict = second_sweep.predict(X_test)
-print(Y_first_predict)
-print(Y_second_predict)
-# assert len(first_sweep.predictors_) == num_predictors
-#
-# verification_moment.load_data(X_test, Y_test, sensitive_features=X_test[:,8])
-# gamma_unmitigated = verification_moment.gamma(lambda x: unmitigated.predict(x))
-# gamma_mitigated = verification_moment.gamma(lambda x: first_sweep.predict(x))
-#
-# for idx in gamma_mitigated.index:
-#     assert abs(gamma_mitigated[idx]) <= abs(
-#         gamma_unmitigated[idx]
-#     ), "Checking {0}".format(idx)
-
-
-
-
+for i in range(num_clients):
+    print("Results for client:", i+1)
+    print('-'*19)
+    print(mf[i].by_group)
+    print(roc[i])
+    print(metrics[i])
+    print(auc_sel[i])
 
 
