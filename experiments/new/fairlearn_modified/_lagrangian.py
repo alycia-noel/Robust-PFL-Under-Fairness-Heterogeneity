@@ -67,7 +67,7 @@ class _Lagrangian:
         **kwargs,
     ):
         self.constraints = constraints
-        self.constraints.load_data(X, y, **kwargs) # need to modify? no, just doing data checking
+        self.constraints.load_data(X, y, **kwargs)
         if objective is None:
             self.obj = self.constraints.default_objective()
         elif objective._moment_type() == constraints._moment_type():
@@ -78,7 +78,7 @@ class _Lagrangian:
                     objective._moment_type(), constraints._moment_type()
                 )
             )
-        self.obj.load_data(X, y, **kwargs) #does not need to be modified just doing data checking
+        self.obj.load_data(X, y, **kwargs)
         self.estimator = estimator
         self.B = B
         self.opt_lambda = opt_lambda
@@ -219,11 +219,6 @@ class _Lagrangian:
             estimator = clone(estimator=self.estimator, safe=False)
 
         oracle_call_start_time = time()
-        # ************** IMPORTANT *************
-        # the below function calls the fit method of the LR class that WE wrote
-        # SO we should be able to return the context vectors here that are collected during the training
-        # prodcedure
-        # context_vec = estimator.fit(blah blah blah)
 
         estimator.fit(self.constraints.X, redY, **{self.sample_weight_name: redW})
         self.oracle_execution_times.append(time() - oracle_call_start_time)
@@ -239,13 +234,12 @@ class _Lagrangian:
         Returns the classifier that solves the best-response problem for
         the vector of Lagrange multipliers `lambda_vec`.
         """
-        # Need to modify _call_oracle(lambda_vec) see above
         classifier = self._call_oracle(lambda_vec)
+        #print(classifier.module_.state_dict())
 
         def h(X):
-            # This is where the predict function of our LR method is called. Need to modify for context
-            # and hnet there
             pred = classifier.predict(X)
+
             # Some estimators return an output of the shape (num_preds, 1) - flatten such
             # results
             if getattr(pred, "flatten", None) is not None:
@@ -272,8 +266,7 @@ class _Lagrangian:
             self.errors.at[h_idx] = h_error
             self.gammas[h_idx] = h_gamma
             self.lambdas[h_idx] = lambda_vec.copy()
-            # Here we can add
-            # self.context[h_idx] = context_vec
+            #self.context[h_idx] = context_vec
             best_idx = h_idx
 
         # also return self.context[best_idx]

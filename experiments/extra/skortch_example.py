@@ -16,6 +16,10 @@ from sklearn.preprocessing import LabelEncoder
 from fairlearn.metrics import MetricFrame, mean_prediction, selection_rate, demographic_parity_difference, demographic_parity_ratio, true_negative_rate, true_positive_rate, false_negative_rate, false_positive_rate, equalized_odds_difference
 from sklearn.metrics import balanced_accuracy_score, roc_auc_score
 from sklearn.calibration import CalibratedClassifierCV
+from skorch.dataset import unpack_data, get_len
+from skorch.utils import to_tensor, TeeGenerator, to_device, to_numpy
+from collections.abc import Mapping
+from skorch.exceptions import SkorchException
 
 class LR(nn.Module):
     def __init__(self, input_size):
@@ -23,42 +27,37 @@ class LR(nn.Module):
         self.input_size=input_size
 
         self.model = nn.Sequential(
-            nn.Linear(self.input_size, 1),
+            nn.Linear(2*self.input_size, 1),
             nn.Sigmoid()
         )
 
-        # self.context = nn.Sequential(
-        #     nn.Linear(self.input_size, 25),
-        #     nn.BatchNorm1d(25),
-        #     nn.ReLU(),
-        #     nn.Linear(25, 25),
-        #     nn.BatchNorm1d(25),
-        #     nn.ReLU(),
-        #     nn.Linear(25, self.input_size)
-        # )
+        self.context = nn.Sequential(
+            nn.Linear(self.input_size, 25),
+            nn.BatchNorm1d(25),
+            nn.ReLU(),
+            nn.Linear(25, 25),
+            nn.BatchNorm1d(25),
+            nn.ReLU(),
+            nn.Linear(25, self.input_size).requires_grad_(False)
+        )
 
     def forward(self, X, **kwargs):
-        # this is where we can call the context vector
-        # i.e., get context, concat with x, then call self.model(x)
-        # context_vector = self.context(X)
-        # avg_context_vector = torch.mean(context_vector, dim=0)
-        # prediction_vector = avg_context_vector.expand(len(X), len(X))
-        # pred_vec = torch.cat((prediction_vector, X), dim=1)
+        context_vector = self.context(X)
+        avg_context_vector = torch.mean(context_vector, dim=0)
+        prediction_vector = avg_context_vector.expand(len(X), self.input_size)
+        pred_vec = torch.cat((prediction_vector, X), dim=1)
 
-        return self.model(X)
+        out = self.model(pred_vec)
+
+        return out, pred_vec, avg_context_vector
 
 
 class SampleWeightLR(NeuralNetClassifier):
     def __init__(self, *args, criterion__reduce=False, **kwargs):
         super().__init__(*args, criterion__reduce=criterion__reduce, **kwargs)
-        # can we make a self.constraints = {}  and for each model fit store the context vectors and when we recall the best
-        # model also get the best constraint vectors so we can agg and send to the hypernework?
 
-    #need to alter fit loop here to get collection of context vectors and we can update the hnet here as well
-    # need run single epoch
+    def fit(self, X, y, sample_weight=None, epochs=None, **fit_params):
 
-    def fit(self, X, y, sample_weight=None):
-        #
         if isinstance(X, (pd.DataFrame, pd.Series)):
             X = X.to_numpy().astype("float32")
         if isinstance(y, (pd.DataFrame, pd.Series)):
@@ -74,39 +73,132 @@ class SampleWeightLR(NeuralNetClassifier):
         )
         X = {"X": X, "sample_weight": sample_weight}
 
-        return super().fit(X, y) #this super().fit refers to the skorch fit method. This fit method is called during the fit (best_h) of expograd
+        self.initialize()
+        self.notify('on_train_begin', X=X, y=y)
+
+        self.check_data(X, y)
+
+        epochs = epochs if epochs is not None else self.max_epochs
+
+        dataset_train, dataset_valid = self.get_split_datasets(X, y, **fit_params)
+        on_epoch_kwargs = {
+            'dataset_train': dataset_train,
+            'dataset_valid': dataset_valid,
+        }
+        iterator_train = self.get_iterator(dataset_train, training=True)
+        iterator_valid = None
+        if dataset_valid is not None:
+            iterator_valid = self.get_iterator(dataset_valid, training=False)
+
+        initial_state_all = self.module_.state_dict()
+
+        initial_state_LR = initial_state_all['model.0.weight']
+
+        for _ in range(epochs):
+            self.notify('on_epoch_begin', **on_epoch_kwargs)
+
+            batch_count = 0
+            for batch in iterator_train:
+                self.notify('on_batch_begin', batch=batch, training=True)
+                step_accumulator = self.get_train_step_accumulator()
+
+                self._zero_grad_optimizer()
+                self._set_training(True)
+                Xi, yi = unpack_data(batch)
+                x = to_tensor(Xi, device=self.device)
+
+                if isinstance(x, Mapping):
+                    x_dict = self._merge_x_and_fit_params(x, fit_params)
+
+                    y_pred, pred_vec, avg_context_vector = self.module_(**x_dict)
+                else:
+                    y_pred, pred_vec, avg_context_vector = self.module_(x, **fit_params)
+
+                loss = self.get_loss(y_pred, yi, X=Xi, training=True)
+
+                loss.backward()
+
+                step = {'loss': loss, 'y_pred': y_pred, 'avg_context': avg_context_vector}
+
+                step_accumulator.store_step(step)
+
+                self.notify('on_grad_computed', named_parameters=TeeGenerator(self.get_all_learnable_params()), batch=batch)
+
+                self.history.record_batch('train_loss', step['loss'].item())
+
+                batch_size = (get_len(batch[0]) if isinstance(batch, (tuple, list)) else get_len(batch))
+                self.history.record_batch('train_batch_size', batch_size)
+                self.history.record_batch('avg context vector', step['avg_context'])
+                self.notify("on_batch_end", batch=batch, training=True, **step)
+                batch_count += 1
+
+            self.history.record('train_batch_count', batch_count)
+            self.notify("on_epoch_end", **on_epoch_kwargs)
+
+        self.notify('on_train_end', X=X, y=y)
+
+        final_state_all = self.module_.state_dict()
+        final_state_LR = final_state_all['model.0.weight']
+        delta_theta =  initial_state_LR - final_state_LR
+        self.history.record_batch('delta_theta', delta_theta)
+
+        return self
 
     def predict(self, X):
-        # we can totally override this to be whatever we want!
-        # i.e., just use predict function from trainer code
-        # just need to check the other end for what is being returned (i.e., vector, matrix, dataframe ...)
-        #here we need to get updated network param from HNET using context
-        # 1. get context
-        # 2. get param from hnet
-        # 3. instantiate params
-        # 4. classify
+        probs = self.predict_proba(X)
+        return probs
 
-        # will most likely just need to copy the predict_proba class from sklearn and modify
+    def predict_proba(self, X):
+        device = 'cuda:4'
         if isinstance(X, (pd.DataFrame, pd.Series)):
             X = X.to_numpy().astype("float32")
-        return(super().predict_proba(X) > 0.5).astype(float)
+
+        # STILL TO DO
+        # need to find how to get context before hand to update the model
+
+        y_proba = []
+        dataset = self.get_dataset(X)
+        iterator = self.get_iterator(dataset, training=False)
+        for batch in iterator:
+            self.check_is_fitted()
+            Xi, _ = unpack_data(batch)
+            with torch.set_grad_enabled(False):
+                x = to_tensor(Xi, device=self.device)
+                if isinstance(x, Mapping):
+                    x_dict = self._merge_x_and_fit_params(x, None)
+
+                    y_predictions, pred_vec, avg_context_vector = self.module_(**x_dict)
+                else:
+                    y_predictions, pred_vec, avg_context_vector = self.module_(x)
+            y_predictions = to_device(y_predictions, device=device)
+
+            for yp in y_predictions:
+                yp = yp[0] if isinstance(yp, tuple) else yp
+                y_proba.append(to_numpy(yp))
+        y_proba = np.concatenate(y_proba, 0)
+        out = (y_proba > 0.5).astype(float)
+
+        return out
 
     def get_loss(self, y_pred, y_true, X, *args, **kwargs):
         loss_unreduced = super().get_loss(
             y_pred, y_true.float(), X, *args, **kwargs
         )
+
         sample_weight = X["sample_weight"]
+
         sample_weight = sample_weight.to(loss_unreduced.device).unsqueeze(-1)
         loss_reduced = (sample_weight * loss_unreduced).mean()
         return loss_reduced
 
-    # def get_params(self, deep=True, **kwargs):
-    #     params = []
-    #
-    #     for name, param in self.module_.named_parameters():
-    #         params.append(param.cpu().detach().numpy().flatten())
-    #
-    #     return params
+
+    def get_parameters(self, deep=True, **kwargs):
+        params = []
+
+        for name, param in self.module_.named_parameters():
+            params.append(param.cpu().detach().numpy().flatten())
+
+        return params
 
 
 def plot_data(Xs, Ys):
@@ -250,19 +342,9 @@ features_xa, features_x, label = cols[:-1], cols[:-2], cols[-1]
 all_client_train, all_client_test = all_client_test_train
 
 for j in range(num_clients):
-    # can we go ahead and get the context vector for the full dataset her? then just pass x + context in the fit?
-    # would we benefit from the learning process? - No, I don't think so. We would only be able to update the context network at
-    # the end of training the main network when it should be updated iteratively alongside it.
-        # get batch
-        # get context
-        # classify
-        # loss
-        # backprop
-        # repeat
-    # can we just copy the code for exponentiated gradient and modify it? I think this may be the best bet rather than trying to update
-    # sklearn fit
+
     print("Training client:", j+1)
-    net = SampleWeightLR(LR(len(features_xa)), max_epochs=25 , optimizer=optim.Adam, lr=.001, batch_size=32, train_split=None, iterator_train__shuffle=True, criterion=nn.BCELoss, device=device)
+    net = SampleWeightLR(LR(len(features_xa)), max_epochs=10 , optimizer=optim.Adam, lr=.001, batch_size=512, train_split=None, iterator_train__shuffle=True, criterion=nn.BCELoss, device=device)
     expgrad_xa = ExponentiatedGradient(net, constraints=DemographicParity(difference_bound=.01), eps=0.05, nu=1e-6)
 
     # this calls the fit function of exponentiated gradient class

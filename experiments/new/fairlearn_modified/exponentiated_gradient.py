@@ -138,7 +138,6 @@ class ExponentiatedGradient(BaseEstimator, MetaEstimatorMixin):
 
         B = 1 / self.eps
 
-        # Need to update the _Lagrangian function to use the context vectors as well.
         # This is just instantiating the _lagrangian class, does not need to be modified
         lagrangian = _Lagrangian(
             X=X,
