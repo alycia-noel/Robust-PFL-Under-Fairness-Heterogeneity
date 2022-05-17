@@ -79,12 +79,13 @@ class _Lagrangian:
                 )
             )
         self.obj.load_data(X, y, **kwargs)
-        self.estimator = estimator
+        self.estimator = estimator # this stores the original estimator from the beginning of the call, never changed
         self.B = B
         self.opt_lambda = opt_lambda
         self.hs = pd.Series(dtype="float64")
         self.predictors = pd.Series(dtype="float64")
         self.errors = pd.Series(dtype="float64")
+        self.avg_context = []
         self.gammas = pd.DataFrame()
         self.lambdas = pd.DataFrame()
         self.n_oracle_calls = 0
@@ -140,7 +141,7 @@ class _Lagrangian:
         L, L_high, gamma, error = self._eval(Q, lambda_hat)
         result = _GapResult(L, L, L_high, gamma, error)
         for mul in [1.0, 2.0, 5.0, 10.0]:
-            _, h_hat_idx = self.best_h(mul * lambda_hat)
+            _, h_hat_idx, _ = self.best_h(mul * lambda_hat)
             logger.debug("%smul=%.0f", _INDENTATION, mul)
             L_low_mul, _, _, _ = self._eval(pd.Series({h_hat_idx: 1.0}), lambda_hat)
             if L_low_mul < result.L_low:
@@ -220,22 +221,26 @@ class _Lagrangian:
 
         oracle_call_start_time = time()
 
-        estimator.fit(self.constraints.X, redY, **{self.sample_weight_name: redW})
+        #initial_state_LR = list(estimator.module_.model.parameters())[0].clone()
+
+        estimator, avg_context_vector = estimator.fit(self.constraints.X, redY, **{self.sample_weight_name: redW})
+        #final_state_LR = list(estimator.module_.model.parameters())[0].clone()
+        # print(initial_state_LR, final_state_LR)
+        # exit(1)
         self.oracle_execution_times.append(time() - oracle_call_start_time)
         self.n_oracle_calls += 1
 
-        # return estimator, context_vec
-        return estimator
+        return estimator, avg_context_vector
 
-    # NEEDS TO BE MODIFIED
     def best_h(self, lambda_vec):
         """Solve the best-response problem.
 
         Returns the classifier that solves the best-response problem for
         the vector of Lagrange multipliers `lambda_vec`.
         """
-        classifier = self._call_oracle(lambda_vec)
-        #print(classifier.module_.state_dict())
+        # this is where the classifier is trained
+        classifier, avg_context_vector = self._call_oracle(lambda_vec)
+        self.avg_context.append(avg_context_vector)
 
         def h(X):
             pred = classifier.predict(X)
@@ -246,6 +251,7 @@ class _Lagrangian:
                 pred = pred.flatten()
             return pred
 
+        # calls predict
         h_error = self.obj.gamma(h)[0]
         h_gamma = self.constraints.gamma(h)
         h_value = h_error + h_gamma.dot(lambda_vec)
@@ -266,11 +272,10 @@ class _Lagrangian:
             self.errors.at[h_idx] = h_error
             self.gammas[h_idx] = h_gamma
             self.lambdas[h_idx] = lambda_vec.copy()
-            #self.context[h_idx] = context_vec
+            self.avg_context[h_idx] = avg_context_vector
             best_idx = h_idx
 
-        # also return self.context[best_idx]
-        return self.hs[best_idx], best_idx
+        return self.hs[best_idx], best_idx, self.avg_context[best_idx]
 
 
 class _GapResult:

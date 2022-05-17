@@ -1,6 +1,7 @@
 from collections import OrderedDict
 import torch
 from torch import nn
+import numpy as np
 
 class NNHyper(nn.Module):
     def __init__(self, n_nodes, embedding_dim, context_vector_size, hidden_size, hnet_hidden_dim = 100, hnet_n_hidden=3):
@@ -204,14 +205,13 @@ class LR(nn.Module):
                 self.M[i, -1] = 1.0
 
     def mu_q(self, pred, sensitive):
-        sensitive = sensitive.view(pred.shape) #nan occurs when all 1
-        all_false_train = torch.zeros((32,))
-        all_false_test = torch.zeros((22,))
+        sensitive = sensitive.view(pred.shape)
+
         expected_values_list = []
         for v in self.sensitive_classes:
             idx_true = sensitive == v
 
-            if torch.equal(idx_true.type(torch.FloatTensor).flatten(), all_false_train) or torch.equal(idx_true.type(torch.FloatTensor).flatten(), all_false_test):
+            if torch.sum(idx_true.type(torch.FloatTensor)) == 0:
                 expected_values_list.append(pred.mean()*0)
             else:
                 expected_values_list.append(pred[idx_true].mean())
@@ -223,7 +223,7 @@ class LR(nn.Module):
         return torch.mv(self.M.to(pred.device), self.mu_q(pred, sensitive) - self.bound.to(pred.device))
 
     def forward(self, x, s):
-        prediction = self.fc1(x)
+        prediction = torch.sigmoid(self.fc1(x))
 
         m_mu_q = self.M_mu_q(prediction, s)
 
@@ -263,14 +263,15 @@ class Constraint(torch.nn.Module):
         self.register_parameter(name='lmbda', param=torch.nn.Parameter(torch.rand((4,1))))
 
     def forward(self, value):
+
         with torch.no_grad():
-            self.lmbda.data = self.lmbda.data.clamp(min=0, max=10000000000)
+            self.lmbda.data = self.lmbda.data.clamp(min=0, max=(np.linalg.norm(self.lmbda.data.cpu().numpy()) + (1/.05)))
 
         for i, lm in enumerate(self.lmbda.data):
             if lm.item() < 0:
-                print(lm.item())
+                print('hit', lm.item())
                 exit(1)
 
-        loss = torch.matmul(self.lmbda.T, value )
+        loss = torch.matmul(self.lmbda.T, value)
 
         return loss

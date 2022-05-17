@@ -10,6 +10,7 @@ from collections import OrderedDict
 from skorch import NeuralNetClassifier
 from fairlearn.reductions import DemographicParity, EqualizedOdds
 from experiments.new.fairlearn_modified.exponentiated_gradient import ExponentiatedGradient
+from fairlearn.reductions import GridSearch
 import matplotlib.pyplot as plt
 warnings.filterwarnings("ignore")
 from sklearn.preprocessing import LabelEncoder
@@ -38,7 +39,7 @@ class LR(nn.Module):
             nn.Linear(25, 25),
             nn.BatchNorm1d(25),
             nn.ReLU(),
-            nn.Linear(25, self.input_size).requires_grad_(False)
+            nn.Linear(25, self.input_size)
         )
 
     def forward(self, X, **kwargs):
@@ -48,15 +49,16 @@ class LR(nn.Module):
         pred_vec = torch.cat((prediction_vector, X), dim=1)
 
         out = self.model(pred_vec)
-
+        # print(out)
         return out, pred_vec, avg_context_vector
 
 
 class SampleWeightLR(NeuralNetClassifier):
     def __init__(self, *args, criterion__reduce=False, **kwargs):
         super().__init__(*args, criterion__reduce=criterion__reduce, **kwargs)
+        self.initialize()
 
-    def fit(self, X, y, sample_weight=None, epochs=None, **fit_params):
+    def fit(self, X, y, sample_weight=None, epochs=50, **fit_params):
 
         if isinstance(X, (pd.DataFrame, pd.Series)):
             X = X.to_numpy().astype("float32")
@@ -73,7 +75,6 @@ class SampleWeightLR(NeuralNetClassifier):
         )
         X = {"X": X, "sample_weight": sample_weight}
 
-        self.initialize()
         self.notify('on_train_begin', X=X, y=y)
 
         self.check_data(X, y)
@@ -90,59 +91,53 @@ class SampleWeightLR(NeuralNetClassifier):
         if dataset_valid is not None:
             iterator_valid = self.get_iterator(dataset_valid, training=False)
 
-        initial_state_all = self.module_.state_dict()
+        sum_context_vectors = [0 for i in range(13)]
+        initial_state_LR = list(self.module_.model.parameters())[0].clone()
 
-        initial_state_LR = initial_state_all['model.0.weight']
+        for e in range(epochs):
+            #batch_count = 0
+            #for batch in iterator_train:
+            batch = next(iter(iterator_train))
 
-        for _ in range(epochs):
-            self.notify('on_epoch_begin', **on_epoch_kwargs)
+            # step_accumulator = self.get_train_step_accumulator()
 
-            batch_count = 0
-            for batch in iterator_train:
-                self.notify('on_batch_begin', batch=batch, training=True)
-                step_accumulator = self.get_train_step_accumulator()
+            self._zero_grad_optimizer()
+            self._set_training(True)
+            Xi, yi = unpack_data(batch)
+            x = to_tensor(Xi, device=self.device)
 
-                self._zero_grad_optimizer()
-                self._set_training(True)
-                Xi, yi = unpack_data(batch)
-                x = to_tensor(Xi, device=self.device)
+            if isinstance(x, Mapping):
+                x_dict = self._merge_x_and_fit_params(x, fit_params)
 
-                if isinstance(x, Mapping):
-                    x_dict = self._merge_x_and_fit_params(x, fit_params)
+                y_pred, pred_vec, avg_context_vector = self.module_(**x_dict)
+            else:
+                y_pred, pred_vec, avg_context_vector = self.module_(x)
 
-                    y_pred, pred_vec, avg_context_vector = self.module_(**x_dict)
-                else:
-                    y_pred, pred_vec, avg_context_vector = self.module_(x, **fit_params)
+            sum_context_vectors = sum_context_vectors + avg_context_vector.cpu().detach().numpy()
 
-                loss = self.get_loss(y_pred, yi, X=Xi, training=True)
+            loss = self.get_loss(y_pred, yi, X=Xi, training=True)
 
-                loss.backward()
+            loss.backward()
 
-                step = {'loss': loss, 'y_pred': y_pred, 'avg_context': avg_context_vector}
+            #checking gradient calculation
+            # params = self.module_.named_parameters()
+            # for n, p in params:
+            #     print(p.grad)
 
-                step_accumulator.store_step(step)
+            step = {'loss': loss, 'y_pred': y_pred, 'avg_context': avg_context_vector}
 
-                self.notify('on_grad_computed', named_parameters=TeeGenerator(self.get_all_learnable_params()), batch=batch)
+            # step_accumulator.store_step(step)
+        final_state_LR = list(self.module_.model.parameters())[0].clone()
 
-                self.history.record_batch('train_loss', step['loss'].item())
+        sum_context_vectors = sum_context_vectors * (1 / epochs)
 
-                batch_size = (get_len(batch[0]) if isinstance(batch, (tuple, list)) else get_len(batch))
-                self.history.record_batch('train_batch_size', batch_size)
-                self.history.record_batch('avg context vector', step['avg_context'])
-                self.notify("on_batch_end", batch=batch, training=True, **step)
-                batch_count += 1
+        # final_state_LR = list(self.module_.model.parameters())[0].grad
+        # print(initial_state_LR, final_state_LR)
+        # exit(1)
+        # delta_theta =  initial_state_LR - final_state_LR
+        # self.history.record_batch('delta_theta', delta_theta)
 
-            self.history.record('train_batch_count', batch_count)
-            self.notify("on_epoch_end", **on_epoch_kwargs)
-
-        self.notify('on_train_end', X=X, y=y)
-
-        final_state_all = self.module_.state_dict()
-        final_state_LR = final_state_all['model.0.weight']
-        delta_theta =  initial_state_LR - final_state_LR
-        self.history.record_batch('delta_theta', delta_theta)
-
-        return self
+        return self, sum_context_vectors
 
     def predict(self, X):
         probs = self.predict_proba(X)
@@ -342,44 +337,99 @@ features_xa, features_x, label = cols[:-1], cols[:-2], cols[-1]
 all_client_train, all_client_test = all_client_test_train
 
 for j in range(num_clients):
+    x_train = all_client_train[j][features_xa]
+    y_train = all_client_train[j][label]
+    A_train = all_client_train[j]['sex']
+    x_test = all_client_test[j][features_xa]
+    y_test = all_client_test[j][label]
+    A_test = all_client_test[j]['sex']
 
     print("Training client:", j+1)
-    net = SampleWeightLR(LR(len(features_xa)), max_epochs=10 , optimizer=optim.Adam, lr=.001, batch_size=512, train_split=None, iterator_train__shuffle=True, criterion=nn.BCELoss, device=device)
-    expgrad_xa = ExponentiatedGradient(net, constraints=DemographicParity(difference_bound=.01), eps=0.05, nu=1e-6)
-
-    # this calls the fit function of exponentiated gradient class
-    expgrad_xa.fit(all_client_train[j][features_xa], all_client_train[j][label], sensitive_features=all_client_train[j]['sex'])
-
-    # this calls the predict function of the exponentatied gradient class
-    scores_expgrad_xa = pd.Series(expgrad_xa.predict(all_client_test[j][features_xa]), name="scores_expgrad_xa")
-
-    # need to figure out how to use context here
-    metric_frame_auc = MetricFrame(metrics=roc_auc_score, y_true=all_client_test[j][label], y_pred=scores_expgrad_xa, sensitive_features=all_client_test[j]['sex'])
-    metric_frame_mean = MetricFrame(metrics=mean_prediction, y_true=all_client_test[j][label], y_pred=scores_expgrad_xa, sensitive_features=all_client_test[j]['sex'])
-    auc = summary_as_df("auc", metric_frame_auc)
-    sel = summary_as_df("selection", metric_frame_mean)
-
-    auc.loc['disparity'] = '-'
-    sel.loc['disparity'] = (sel.loc[1] - sel.loc[0]).abs()
-
-    mf.append( MetricFrame({
-        'TPR': true_positive_rate,
+    net = SampleWeightLR(LR(len(features_xa)), max_epochs=25 , optimizer=optim.Adam, lr=.001, batch_size=256, train_split=None, iterator_train__shuffle=True, criterion=nn.BCELoss, device=device)
+    net.fit(x_train, y_train)
+    predictions = net.predict(x_test)
+    mf = MetricFrame({
         'FPR': false_positive_rate,
-        'TNR': true_negative_rate,
         'FNR': false_negative_rate},
-        all_client_test[j][label], scores_expgrad_xa, sensitive_features=all_client_test[j]['sex']))
+        y_test, predictions, sensitive_features=A_test)
 
-    models_dict = {'expgrad': (scores_expgrad_xa)}
-    roc.append(roc_auc_score(all_client_train[j][label], expgrad_xa.predict(all_client_train[j][features_xa])))
-    metrics.append(get_metrics_df(models_dict, all_client_test[j][label], all_client_test[j]['sex']))
-    auc_sel.append(pd.concat([auc, sel], axis=1))
+    model_dict = {"unmitigated": predictions}
+    print(mf.by_group)
+    print(get_metrics_df(model_dict, y_test, A_test))
+    sweep = GridSearch(net,
+                       constraints=EqualizedOdds(),
+                       grid_size=50)
 
-for i in range(num_clients):
-    print("Results for client:", i+1)
-    print('-'*19)
-    print(mf[i].by_group)
-    print(roc[i])
-    print(metrics[i])
-    print(auc_sel[i])
+    sweep.fit(x_train, y_train, sensitive_features=A_train)
+    sweep_preds = [predictor.predict(x_test) for predictor in sweep.predictors_]
+
+    equalized_odds_sweep = [
+        equalized_odds_difference(y_test, preds, sensitive_features=A_test)
+        for preds in sweep_preds
+    ]
+    balanced_accuracy_sweep = [balanced_accuracy_score(y_test, preds) for preds in sweep_preds]
+    auc_sweep = roc_auc_score(y_train, net.predict(x_train))
+    all_results = pd.DataFrame(
+        {"predictor": sweep.predictors_, "accuracy": balanced_accuracy_sweep, "disparity": equalized_odds_sweep}
+    )
+    non_dominated = []
+    for row in all_results.itertuples():
+        accuracy_for_lower_or_eq_disparity = all_results["accuracy"][all_results["disparity"] <= row.disparity]
+        if row.accuracy >= accuracy_for_lower_or_eq_disparity.max():
+            non_dominated.append(True)
+        else:
+            non_dominated.append(False)
+
+    equalized_odds_sweep_non_dominated = np.asarray(equalized_odds_sweep)[non_dominated]
+    balanced_accuracy_non_dominated = np.asarray(balanced_accuracy_sweep)[non_dominated]
+    grid_search_dict = {"GridSearch_{}".format(i): sweep_preds[i]
+                        for i in range(len(sweep_preds))
+                        if non_dominated[i] and equalized_odds_sweep[i] < 0.02}
+    model_dict.update(grid_search_dict)
+    get_metrics_df(model_dict, y_test, A_test)
+    print(mf.by_group)
+    print(get_metrics_df(model_dict, y_test, A_test))
+    print(roc_auc_score(y_train, net.predict(x_train)))
+
+#     expgrad_xa = ExponentiatedGradient(net, constraints=DemographicParity(difference_bound=.01), eps=0.05, nu=None) #1e-6
+#
+#     # this calls the fit function of exponentiated gradient class
+#
+#     initial_state_LR = list(expgrad_xa.estimator.module_.model.parameters())[0].clone()
+#     expgrad_xa.fit(all_client_train[j][features_xa], all_client_train[j][label], sensitive_features=all_client_train[j]['sex'])
+#     final_state_LR = list(expgrad_xa.estimator.module_.model.parameters())[0].clone()
+#     print(initial_state_LR, final_state_LR, initial_state_LR - final_state_LR)
+#
+#     # this calls the predict function of the exponentatied gradient class
+#     scores_expgrad_xa = pd.Series(expgrad_xa.predict(all_client_test[j][features_xa]), name="scores_expgrad_xa")
+#
+#     # need to figure out how to use context here
+#     metric_frame_auc = MetricFrame(metrics=roc_auc_score, y_true=all_client_test[j][label], y_pred=scores_expgrad_xa, sensitive_features=all_client_test[j]['sex'])
+#     metric_frame_mean = MetricFrame(metrics=mean_prediction, y_true=all_client_test[j][label], y_pred=scores_expgrad_xa, sensitive_features=all_client_test[j]['sex'])
+#     auc = summary_as_df("auc", metric_frame_auc)
+#     sel = summary_as_df("selection", metric_frame_mean)
+#
+#     auc.loc['disparity'] = '-'
+#     sel.loc['disparity'] = (sel.loc[1] - sel.loc[0]).abs()
+#
+#     mf.append( MetricFrame({
+#         'TPR': true_positive_rate,
+#         'FPR': false_positive_rate,
+#         'TNR': true_negative_rate,
+#         'FNR': false_negative_rate},
+#         all_client_test[j][label], scores_expgrad_xa, sensitive_features=all_client_test[j]['sex']))
+#
+#     models_dict = {'expgrad': (scores_expgrad_xa)}
+#     roc.append(roc_auc_score(all_client_train[j][label], expgrad_xa.predict(all_client_train[j][features_xa])))
+#     metrics.append(get_metrics_df(models_dict, all_client_test[j][label], all_client_test[j]['sex']))
+#     auc_sel.append(pd.concat([auc, sel], axis=1))
+#
+# for i in range(num_clients):
+#     print("Results for client:", i+1)
+#     print('-'*19)
+#     print(mf[i].by_group)
+#     print(roc[i])
+#     print(metrics[i])
+#     print(auc_sel[i])
 
 

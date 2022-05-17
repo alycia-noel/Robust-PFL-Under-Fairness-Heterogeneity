@@ -12,9 +12,9 @@ class BaseNodes:
         self._init_dataloaders()
 
     def _init_dataloaders(self):
-        loaders, self.features = gen_random_loaders(self.data_name, self.n_nodes, self.batch_size, self.classes_per_node)
+        loaders, self.features = gen_random_loaders(self.data_name, self.n_nodes, self.batch_size)
         self.train_loaders, self.test_loaders = loaders
-        #self.c_i = [torch.zeros((1, len(self.features))) for i in range(self.n_nodes)]
         self.c_i = [torch.rand((1, len(self.features))) for i in range(self.n_nodes)]
+
     def __len__(self):
         return self.n_nodes

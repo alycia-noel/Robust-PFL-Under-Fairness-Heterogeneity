@@ -65,6 +65,7 @@ def evaluate(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fa
         for batch_count, batch in enumerate(curr_data):
             x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
             s = x[:, which_position].to(device)
+
             true_client.extend(y.cpu().numpy())
             queries_client.extend(x.cpu().numpy())
 
@@ -73,14 +74,14 @@ def evaluate(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fa
             model.load_state_dict(weights)
 
             pred, m_mu_q = model(prediction_vector, s)
-            pred_prob = torch.sigmoid(pred)
-            pred_thresh = (pred_prob > 0.5).long()
+            #pred_prob = torch.sigmoid(pred)
+            pred_thresh = (pred > 0.5).long()
             pred_client.extend(pred_thresh.flatten().cpu().numpy())
 
             if fair == 'none':
                 running_loss += loss(pred, y.unsqueeze(1)).item()
             else:
-                running_loss += (loss(pred, y.unsqueeze(1)) + alpha*constraint(m_mu_q).to(device)).item()
+                running_loss += (loss(pred, y.unsqueeze(1)) + alpha*constraint(m_mu_q).to(device)).item() / len(batch)
 
             correct = torch.eq(pred_thresh,y.unsqueeze(1)).type(torch.cuda.LongTensor)
             running_correct += torch.count_nonzero(correct).item()
@@ -99,7 +100,7 @@ def evaluate(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fa
         aod.append(AOD)
         eod.append(EOD)
         spd.append(SPD)
-        results[node_id]['loss'] = running_loss / (batch_count + 1)
+        results[node_id]['loss'] = running_loss
         results[node_id]['correct'] = running_correct
         results[node_id]['total'] = running_samples
         preds.append(pred_client)
@@ -137,7 +138,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
     constraint.to(device)
 
     optimizer = torch.optim.Adam(params=hnet.parameters(), lr=lr, weight_decay=wd)
-    loss = torch.nn.BCEWithLogitsLoss()
+    loss = torch.nn.BCELoss()
     client_optimizers = [torch.optim.Adam(combo_params, lr=inner_lr, weight_decay=inner_wd) for i in range(num_nodes)]
 
     # if fair == 'none':
@@ -212,7 +213,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
         optimizer.step()
 
-        if step % 99 == 0 or step == 999 or step == 0:
+        if step % 99 == 0 or step == 1499 or step == 0:
             step_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, confusion=False, fair=fair, constraint=constraint, alpha=alpha, which_position=which_position)
 
             logging.info(f"\nStep: {step + 1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}")

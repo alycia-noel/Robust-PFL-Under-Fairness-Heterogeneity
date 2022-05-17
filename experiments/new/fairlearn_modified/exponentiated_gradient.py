@@ -119,6 +119,8 @@ class ExponentiatedGradient(BaseEstimator, MetaEstimatorMixin):
         self.eta0 = eta0
         self.run_linprog_step = run_linprog_step
         self.sample_weight_name = sample_weight_name
+        self.context_vector = []
+        self.initial_weights = []
 
     def fit(self, X, y, **kwargs):
         """Return a fair classifier under specified fairness constraints.
@@ -167,16 +169,17 @@ class ExponentiatedGradient(BaseEstimator, MetaEstimatorMixin):
             lambda_EG = self.lambda_vecs_EG_.mean(axis=1)
 
             # select classifier according to best_h method
-            h, h_idx = lagrangian.best_h(lambda_vec) #### NEED TO MODIFY BEST H
-            #h, h_idx, context_best
+            h, h_idx, avg_context_best = lagrangian.best_h(lambda_vec)
+            print(h, h_idx, avg_context_best)
 
             if t == 0:
                 if self.nu is None:
                     self.nu = (
                         _ACCURACY_MUL
-                        * (h(X) - self.constraints._y_as_series).abs().std() # need to add context to X
+                        * (h(X) - self.constraints._y_as_series).abs().std()
                         / np.sqrt(self.constraints.total_samples)
                     )
+                    print(self.nu)
                 eta = self.eta0 / B
                 logger.debug(
                     "...eps=%.3f, B=%.1f, nu=%.6f, max_iter=%d",
@@ -249,8 +252,9 @@ class ExponentiatedGradient(BaseEstimator, MetaEstimatorMixin):
         self.best_iter_ = gaps_best.index[-1]
         self.best_gap_ = gaps[self.best_iter_]
         self.weights_ = Qs[self.best_iter_]
-        # add self.context = something
+        print(self.weights_)
         self._hs = lagrangian.hs
+        print(self._hs.index)
         for h_idx in self._hs.index:
             if h_idx not in self.weights_.index:
                 self.weights_.at[h_idx] = 0.0
@@ -261,6 +265,7 @@ class ExponentiatedGradient(BaseEstimator, MetaEstimatorMixin):
         self.n_oracle_calls_dummy_returned_ = lagrangian.n_oracle_calls_dummy_returned
         self.oracle_execution_times_ = lagrangian.oracle_execution_times
         self.lambda_vecs_ = lagrangian.lambdas
+        self.context_vector = avg_context_best
 
         logger.debug(
             "...eps=%.3f, B=%.1f, nu=%.6f, max_iter=%d",
@@ -277,7 +282,7 @@ class ExponentiatedGradient(BaseEstimator, MetaEstimatorMixin):
             lagrangian.n_oracle_calls,
             len(lagrangian.predictors),
         )
-        return self
+        return self, avg_context_best
 
     def predict(self, X, random_state=None): #does not need changed, change pmf_predict
         """Provide predictions for the given input data.
@@ -345,8 +350,7 @@ class ExponentiatedGradient(BaseEstimator, MetaEstimatorMixin):
         check_is_fitted(self)
 
         pred = pd.DataFrame()
-        # need to call context here before ._hs[t](X). additionally, need to update the logreg parameters
-        # by sending the batch context to hnet
+
         for t in range(len(self._hs)):
             if self.weights_[t] == 0:
                 pred[t] = np.zeros(len(X))
