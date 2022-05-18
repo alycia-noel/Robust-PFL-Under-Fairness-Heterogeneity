@@ -109,157 +109,179 @@ def evaluate(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fa
     return results, preds, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd
 
 def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,inner_steps,lr,inner_lr,wd,inner_wd, hyper_hid,n_hidden,bs, alpha,fair, which_position):
+    avg_acc = [[] for i in range(num_nodes + 1)]
+    all_f1 = [[] for i in range(num_nodes)]
+    all_aod = [[] for i in range(num_nodes)]
+    all_eod = [[] for i in range(num_nodes)]
+    all_spd = [[] for i in range(num_nodes)]
+    all_times = []
+    for i in range(10):
+        seed_everything(0)
 
-    seed_everything(0)
+        nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node)
 
-    nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node)
+        num_features = len(nodes.features)
 
-    num_features = len(nodes.features)
+        embed_dim = num_features
 
-    embed_dim = num_features
+        hnet = LRHyper(device=device,n_nodes=num_nodes, embedding_dim=embed_dim, context_vector_size=num_features, hidden_size=num_features, hnet_hidden_dim=hyper_hid, hnet_n_hidden=n_hidden)
+        model = LR(input_size=num_features, bound=0.05)
+        cnet = Context(input_size=num_features, context_vector_size=num_features, context_hidden_size=25)
+        constraint = Constraint()
 
-    hnet = LRHyper(device=device,n_nodes=num_nodes, embedding_dim=embed_dim, context_vector_size=num_features, hidden_size=num_features, hnet_hidden_dim=hyper_hid, hnet_n_hidden=n_hidden)
-    model = LR(input_size=num_features, bound=0.05)
-    cnet = Context(input_size=num_features, context_vector_size=num_features, context_hidden_size=25)
-    constraint = Constraint()
+        if fair == 'none':
+            combo_params = list(model.parameters()) + list(cnet.parameters())
+        else:
+            combo_params = list(model.parameters()) + list(cnet.parameters()) + list(constraint.parameters())
 
-    if fair == 'none':
-        combo_params = list(model.parameters()) + list(cnet.parameters())
-    else:
-        combo_params = list(model.parameters()) + list(cnet.parameters()) + list(constraint.parameters())
+        device = "cpu"
+        if torch.cuda.is_available():
+            device = "cuda:4"
 
-    device = "cpu"
-    if torch.cuda.is_available():
-        device = "cuda:4"
+        hnet.to(device)
+        model.to(device)
+        cnet.to(device)
+        constraint.to(device)
 
-    hnet.to(device)
-    model.to(device)
-    cnet.to(device)
-    constraint.to(device)
+        optimizer = torch.optim.Adam(params=hnet.parameters(), lr=lr, weight_decay=wd)
+        loss = torch.nn.BCELoss()
+        client_optimizers = [torch.optim.Adam(combo_params, lr=inner_lr, weight_decay=inner_wd) for i in range(num_nodes)]
 
-    optimizer = torch.optim.Adam(params=hnet.parameters(), lr=lr, weight_decay=wd)
-    loss = torch.nn.BCELoss()
-    client_optimizers = [torch.optim.Adam(combo_params, lr=inner_lr, weight_decay=inner_wd) for i in range(num_nodes)]
-
-    # if fair == 'none':
-    #     fair_loss = None
-    # elif fair == 'dp':
-    #     fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=alpha)
-    # elif fair == 'eo':
-    #     fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=alpha)
-    # else:
-    #     fair_loss = None
-
-    step_iter = trange(steps)
-
-    for step in step_iter:
-        hnet.train()
-        node_id = random.choice(range(num_nodes))
-
-        node_c_i = nodes.c_i[node_id]
-
-        weights = hnet(node_c_i, torch.tensor([node_id], dtype=torch.long).to(device))
-        model.load_state_dict(weights)
-
-        inner_optim = client_optimizers[node_id]
-
-        inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
-
-        # if node_id % 2 == 0:
-        #     fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=100)
+        # if fair == 'none':
+        #     fair_loss = None
+        # elif fair == 'dp':
+        #     fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=alpha)
+        # elif fair == 'eo':
+        #     fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=alpha)
         # else:
-        #     fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=150)
+        #     fair_loss = None
 
-        avg_c_i = []
+        step_iter = trange(steps)
+
+        for step in step_iter:
+            hnet.train()
+            node_id = random.choice(range(num_nodes))
+
+            node_c_i = nodes.c_i[node_id]
+
+            weights = hnet(node_c_i, torch.tensor([node_id], dtype=torch.long).to(device))
+            model.load_state_dict(weights)
+
+            inner_optim = client_optimizers[node_id]
+
+            inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
+
+            # if node_id % 2 == 0:
+            #     fair_loss = DemographicParityLoss(sensitive_classes=[0, 1], alpha=100)
+            # else:
+            #     fair_loss = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=150)
+
+            avg_c_i = []
 
 
-        for j in range(inner_steps):
-            model.train()
+            for j in range(inner_steps):
+                model.train()
 
-            inner_optim.zero_grad()
+                inner_optim.zero_grad()
+                optimizer.zero_grad()
+
+                batch = next(iter(nodes.train_loaders[node_id]))
+
+                x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
+                s = x[:,which_position].to(device)
+
+                avg_context_vector, pred_vec = cnet(x, num_features)
+                pred, m_mu_q = model(pred_vec, s)
+
+                avg_c_i.append(avg_context_vector)
+
+                if fair == 'none':
+                    err = loss(pred, y.unsqueeze(1))
+                else:
+                    err = loss(pred, y.unsqueeze(1)) + alpha*constraint(m_mu_q)
+
+                err.backward()
+
+                if fair != 'none':
+                    combo_params[len(combo_params) - 1].grad.data = -1 * combo_params[len(combo_params) - 1].grad.data
+
+                inner_optim.step()
+
+            nodes.c_i[node_id] = torch.cuda.FloatTensor([sum(sub_list) / len(sub_list) for sub_list in zip(*avg_c_i)])
+
             optimizer.zero_grad()
+            final_state = model.state_dict()
+            delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
+            hnet_grads = torch.autograd.grad(list(weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values()))
 
-            batch = next(iter(nodes.train_loaders[node_id]))
+            for p, g in zip(hnet.parameters(), hnet_grads):
+                p.grad = g
 
-            x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
-            s = x[:,which_position].to(device)
+            optimizer.step()
 
-            avg_context_vector, pred_vec = cnet(x, num_features)
-            pred, m_mu_q = model(pred_vec, s)
+            if step % 99 == 0 or step == 1499 or step == 0:
+                step_results, avg_loss, avg_acc_all, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, confusion=False, fair=fair, constraint=constraint, alpha=alpha, which_position=which_position)
 
-            avg_c_i.append(avg_context_vector)
-
-            if fair == 'none':
-                err = loss(pred, y.unsqueeze(1))
-            else:
-                err = loss(pred, y.unsqueeze(1)) + alpha*constraint(m_mu_q)
-
-            err.backward()
-
-            if fair != 'none':
-                combo_params[len(combo_params) - 1].grad.data = -1 * combo_params[len(combo_params) - 1].grad.data
-
-            inner_optim.step()
-
-        nodes.c_i[node_id] = torch.cuda.FloatTensor([sum(sub_list) / len(sub_list) for sub_list in zip(*avg_c_i)])
-
-        optimizer.zero_grad()
-        final_state = model.state_dict()
-        delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
-        hnet_grads = torch.autograd.grad(list(weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values()))
-
-        for p, g in zip(hnet.parameters(), hnet_grads):
-            p.grad = g
-
-        optimizer.step()
-
-        if step % 99 == 0 or step == 1499 or step == 0:
-            step_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, confusion=False, fair=fair, constraint=constraint, alpha=alpha, which_position=which_position)
-
-            logging.info(f"\nStep: {step + 1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}")
-            writer.add_scalars('testing accuracy', {
-                'average': avg_acc,
-                'client 1': all_acc[0],
-                'client 2': all_acc[1],
-                'client 3': all_acc[2],
-                'client 4': all_acc[3]
-            }, step)
-            writer.add_scalars('testing loss', {
-                'average': avg_loss,
-                'client 1': all_loss[0],
-                'client 2': all_loss[1],
-                'client 3': all_loss[2],
-                'client 4': all_loss[3]
-            }, step)
-            writer.add_scalars('AOD', {
-                'average': np.mean(aod),
-                'client 1': aod[0],
-                'client 2': aod[1],
-                'client 3': aod[2],
-                'client 4': aod[3]
-            }, step)
-            writer.add_scalars('EOD', {
-                'average': np.mean(eod),
-                'client 1': eod[0],
-                'client 2': eod[1],
-                'client 3': eod[2],
-                'client 4': eod[3]
-            }, step)
-            writer.add_scalars('SPD', {
-                'average': np.mean(spd),
-                'client 1': spd[0],
-                'client 2': spd[1],
-                'client 3': spd[2],
-                'client 4': spd[3]
-            }, step)
+                logging.info(f"\nStep: {step + 1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc_all:.4f}")
+                # writer.add_scalars('testing accuracy', {
+                #     'average': avg_acc,
+                #     'client 1': all_acc[0],
+                #     'client 2': all_acc[1],
+                #     'client 3': all_acc[2],
+                #     'client 4': all_acc[3]
+                # }, step)
+                # writer.add_scalars('testing loss', {
+                #     'average': avg_loss,
+                #     'client 1': all_loss[0],
+                #     'client 2': all_loss[1],
+                #     'client 3': all_loss[2],
+                #     'client 4': all_loss[3]
+                # }, step)
+                # writer.add_scalars('AOD', {
+                #     'average': np.mean(aod),
+                #     'client 1': aod[0],
+                #     'client 2': aod[1],
+                #     'client 3': aod[2],
+                #     'client 4': aod[3]
+                # }, step)
+                # writer.add_scalars('EOD', {
+                #     'average': np.mean(eod),
+                #     'client 1': eod[0],
+                #     'client 2': eod[1],
+                #     'client 3': eod[2],
+                #     'client 4': eod[3]
+                # }, step)
+                # writer.add_scalars('SPD', {
+                #     'average': np.mean(spd),
+                #     'client 1': spd[0],
+                #     'client 2': spd[1],
+                #     'client 3': spd[2],
+                #     'client 4': spd[3]
+                # }, step)
 
 
-    step_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, confusion=False,fair=fair, constraint=constraint, alpha=alpha, which_position=which_position)
-    logging.info(f"\n\nFinal Results | AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}")
+        step_results, avg_loss, avg_acc_all, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, confusion=False,fair=fair, constraint=constraint, alpha=alpha, which_position=which_position)
+        logging.info(f"\n\nFinal Results | AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc_all:.4f}")
+        avg_acc[0].append(avg_acc_all)
+        for i in range(num_nodes):
+            avg_acc[i + 1].append(all_acc[i])
+            all_f1[i].append(f1[i])
+            all_aod[i].append(aod[i])
+            all_eod[i].append(eod[i])
+            all_spd[i].append(spd[i])
+        all_times.append(step_iter.format_dict["elapsed"])
+
+
+    try:
+        print(f"\n\nFinal Results | AVG Acc: {np.mean(avg_acc[0]):.4f}, AVG Time: {np.mean(all_times): .2f}")
+    except:
+        print(f"\n\nFinal Results | AVG Acc: {np.mean(avg_acc[0]):.4f}")
+        print(all_times)
     for i in range(num_nodes):
-        print("\nClient", i+1)
+        print("\nClient", i + 1)
         print(i)
-        print(f"Acc: {all_acc[i]:.4f}, F Acc: {f_a[i]:.4f}, M Acc: {m_a[i]:.4f}, F1: {f1[i]:.4f}, AOD: {aod[i]:.4f}, EOD: {eod[i]:.4f}, SPD: {spd[i]:.4f}")
+        print(
+            f"Acc: {np.mean(avg_acc[i + 1]):.4f}, F1: {np.mean(all_f1[i]):.4f}, AOD: {np.mean(all_aod[i]):.4f}, EOD: {np.mean(all_eod[i]):.4f}, SPD: {np.mean(all_spd[i]):.4f}")
 
 
 def main():
@@ -269,7 +291,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-    parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
+    parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
     parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
     parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
     parser.add_argument("--num_steps", type=int, default=1500)
@@ -286,7 +308,7 @@ def main():
     parser.add_argument("--eval_every", type=int, default=50, help="eval every X selected epochs")
     parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results", help="dir path for output file")
     parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="dp", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
+    parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
     parser.add_argument("--alpha", type=int, default=80, help="fairness/accuracy trade-off parameter")
     parser.add_argument("--which_position", type=int, default=5, choices=[5,8], help="which position the sensitive attribute is in. 5: compas, 8: adult")
     args = parser.parse_args()
