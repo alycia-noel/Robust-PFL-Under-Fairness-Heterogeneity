@@ -1,7 +1,6 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = "0,1, 2, 3, 4, 5, 6, 7"
+os.environ['CUDA_VISIBLE_DEVICES'] = "1, 2, 3, 4, 5, 6, 7"
 import argparse
-import logging
 import random
 import warnings
 from collections import OrderedDict, defaultdict
@@ -10,13 +9,14 @@ import torch
 import pandas as pd
 import torch.utils.data
 from tqdm import trange
-from experiments.new.models import LR, Context, LRHyper, Constraint
-from experiments.new.node import BaseNodes
-from experiments.new.utils import get_device, seed_everything, set_logger, TP_FP_TN_FN, metrics, make_ascent
+from models import LR, Context, LRHyper, Constraint
+from node import BaseNodes
+from utils import get_device, seed_everything, set_logger, TP_FP_TN_FN, metrics, make_ascent
+
 from torch.utils.tensorboard import SummaryWriter
 import matplotlib.pyplot as plt
 import seaborn as sn
-from fairtorch import DemographicParityLoss, EqualiedOddsLoss
+
 warnings.filterwarnings("ignore")
 
 def eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, confusion, which_position):
@@ -132,10 +132,8 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
     client_optimizers = [None for i in range(num_nodes)]
     combo_parameters = [None for i in range(num_nodes)]
 
-    save_file_name = "3_32_25.txt"
+    save_file_name = "/home/ancarey/FairFLHN/experiments/new/grid_search/results/3_64_100.txt"
 
-    #file = open(save_file_name, "w")
-    #file.close()
     for i in range(1):
         seed_everything(0)
 
@@ -176,7 +174,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
         device = "cpu"
         if torch.cuda.is_available():
-            device = "cuda:0"
+            device = "cuda:5"
 
         hnet.to(device)
 
@@ -252,10 +250,10 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
             optimizer.step()
 
-            if step % 99 == 0 or step == 1499 or step == 0:
-                step_results, avg_loss, avg_acc_all, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, models, cnets, num_features, loss, device, confusion=False, fair=fair, constraint=constraints, alpha=alpha, which_position=which_position)
-
-                logging.info(f"\nStep: {step + 1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc_all:.4f}")
+            # if step % 99 == 0 or step == 1499 or step == 0:
+            #     step_results, avg_loss, avg_acc_all, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, models, cnets, num_features, loss, device, confusion=False, fair=fair, constraint=constraints, alpha=alpha, which_position=which_position)
+            #
+            #     logging.info(f"\nStep: {step + 1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc_all:.4f}")
             #     # writer.add_scalars('testing accuracy', {
                 #     'average': avg_acc,
                 #     'client 1': all_acc[0],
@@ -294,7 +292,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
 
         step_results, avg_loss, avg_acc_all, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, models, cnets, num_features, loss, device, confusion=False,fair=fair, constraint=constraints, alpha=alpha, which_position=which_position)
-        logging.info(f"\n\nFinal Results | AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc_all:.4f}")
+        # logging.info(f"\n\nFinal Results | AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc_all:.4f}")
         avg_acc[0].append(avg_acc_all)
         for i in range(num_nodes):
             avg_acc[i + 1].append(all_acc[i])
@@ -304,78 +302,84 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
             all_spd[i].append(spd[i])
         all_times.append(step_iter.format_dict["elapsed"])
 
-    for i in range(num_nodes):
-        print("\nClient {0}".format(i+1))
-        print(
-            f"\nAcc: {np.mean(avg_acc[i + 1]):.4f}, F1: {np.mean(all_f1[i]):.4f}, AOD: {np.mean(all_aod[i]):.4f}, EOD: {np.mean(all_eod[i]):.4f}, SPD: {np.mean(all_spd[i]):.4f}")
-
-
-# file = open(save_file_name, "a")
-    # file.write("\n\nResults for Client LR: {0},\t HN LR: {1},\t WD: {2},\t AVG acc: {3:.4f}".format(inner_lr, lr, wd,np.mean(avg_acc[0])))
+    file = open(save_file_name, "a")
+    file.write("\n\nLR: {0}, HN LR: {1}, WD: {2}, AVG Acc: {3:.4f}".format(inner_lr, lr, wd,np.mean(avg_acc[0])))
     # file.write(f"\nFinal Results | AVG Acc: {np.mean(avg_acc[0]):.4f}")
     # for i in range(num_nodes):
-    #     file.write("\nClient {0}".format(i+1))
+    #     file.write("\nClient", i + 1)
     #     file.write(
     #         f"\nAcc: {np.mean(avg_acc[i + 1]):.4f}, F1: {np.mean(all_f1[i]):.4f}, AOD: {np.mean(all_aod[i]):.4f}, EOD: {np.mean(all_eod[i]):.4f}, SPD: {np.mean(all_spd[i]):.4f}")
-    #file.close()
+    file.close()
 
 def main():
-    pd.set_option('display.float_format', lambda x: '%.1f' % x)
 
-    writer = SummaryWriter('results')
+    file = open("/home/ancarey/FairFLHN/experiments/new/grid_search/results/3_64_100.txt", "w")
+    file.close()
 
-    parser = argparse.ArgumentParser(description="Fair Hypernetworks")
+    client_lr = [1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2]
+    hn_lr = [1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2]
+    wd = [1e-10, 1e-8, 1e-6]
 
-    parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
-    parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
-    parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
-    parser.add_argument("--num_steps", type=int, default=2000)
-    parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
-    parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
-    parser.add_argument("--inner_lr", type=float, default=.00005, help="learning rate for inner optimizer")
-    parser.add_argument("--lr", type=float, default=5e-5, help="learning rate")
-    parser.add_argument("--wd", type=float, default=1e-6, help="weight decay")
-    parser.add_argument("--inner_wd", type=float, default=1e-6, help="inner weight decay")
-    parser.add_argument("--embed_dim", type=int, default=10, help="embedding dim")
-    parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
-    parser.add_argument("--gpu", type=int, default=0, help="gpu device ID")
-    parser.add_argument("--eval_every", type=int, default=50, help="eval every X selected epochs")
-    parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results", help="dir path for output file")
-    parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=80, help="fairness/accuracy trade-off parameter")
-    parser.add_argument("--which_position", type=int, default=8, choices=[5,8], help="which position the sensitive attribute is in. 5: compas, 8: adult")
-    parser.add_argument("--context_hidden_size", type=int, default = 50, choices=[25,50,100], help="size of hidden layers of context network")
+    for i, clr in enumerate(client_lr):
+        for j, hnlr in enumerate(hn_lr):
+            for k, w in enumerate(wd):
 
-    args = parser.parse_args()
-    assert args.gpu <= torch.cuda.device_count()
-    set_logger()
+                pd.set_option('display.float_format', lambda x: '%.1f' % x)
 
-    device = get_device(gpus=args.gpu)
+                writer = SummaryWriter('results')
 
-    args.classes_per_node = 2
+                parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-    train(
-    writer,
-    device=device,
-    data_name=args.data_name,
-    model_name=args.model_name,
-    classes_per_node = args.classes_per_node,
-    num_nodes=args.num_nodes,
-    steps=args.num_steps,
-    inner_steps=args.inner_steps,
-    lr = args.lr,
-    inner_lr = args.inner_lr,
-    wd = args.wd,
-    inner_wd = args.inner_wd,
-    hyper_hid = args.hyper_hid,
-    n_hidden = args.n_hidden,
-    bs = args.batch_size,
-    alpha = args.alpha,
-    fair = args.fair,
-    which_position = args.which_position,
-    context_hidden_size=args.context_hidden_size)
+                parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
+                parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
+                parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
+                parser.add_argument("--num_steps", type=int, default=2000)
+                parser.add_argument("--batch_size", type=int, default=64)
+                parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
+                parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
+                parser.add_argument("--inner_lr", type=float, default=clr, help="learning rate for inner optimizer")
+                parser.add_argument("--lr", type=float, default=hnlr, help="learning rate")
+                parser.add_argument("--wd", type=float, default=w, help="weight decay")
+                parser.add_argument("--inner_wd", type=float, default=w, help="inner weight decay")
+                parser.add_argument("--embed_dim", type=int, default=10, help="embedding dim")
+                parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
+                parser.add_argument("--gpu", type=int, default=5, help="gpu device ID")
+                parser.add_argument("--eval_every", type=int, default=50, help="eval every X selected epochs")
+                parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results", help="dir path for output file")
+                parser.add_argument("--seed", type=int, default=0, help="seed value")
+                parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
+                parser.add_argument("--alpha", type=int, default=80, help="fairness/accuracy trade-off parameter")
+                parser.add_argument("--which_position", type=int, default=5, choices=[5,8], help="which position the sensitive attribute is in. 5: compas, 8: adult")
+                parser.add_argument("--context_hidden_size", type=int, default = 100, choices=[25,50,100], help="size of hidden layers of context network")
+
+                args = parser.parse_args()
+                assert args.gpu <= torch.cuda.device_count()
+                set_logger()
+
+                device = get_device(gpus=args.gpu)
+
+                args.classes_per_node = 2
+
+                train(
+                writer,
+                device=device,
+                data_name=args.data_name,
+                model_name=args.model_name,
+                classes_per_node = args.classes_per_node,
+                num_nodes=args.num_nodes,
+                steps=args.num_steps,
+                inner_steps=args.inner_steps,
+                lr = args.lr,
+                inner_lr = args.inner_lr,
+                wd = args.wd,
+                inner_wd = args.inner_wd,
+                hyper_hid = args.hyper_hid,
+                n_hidden = args.n_hidden,
+                bs = args.batch_size,
+                alpha = args.alpha,
+                fair = args.fair,
+                which_position = args.which_position,
+                context_hidden_size=args.context_hidden_size)
 
 if __name__ == "__main__":
     main()
