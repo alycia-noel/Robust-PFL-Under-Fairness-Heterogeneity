@@ -216,6 +216,7 @@ class LR(nn.Module):
 
             self.c = torch.zeros(self.n_constraints)
             element_k_a = self.sensitive_classes + [None]
+
             for i_a, a_0 in enumerate(self.sensitive_classes):
                 for i_y, y_0 in enumerate(self.y_classes):
                     for i_s, s in enumerate([-1, 1]):
@@ -240,11 +241,17 @@ class LR(nn.Module):
             for u in self.sensitive_classes:
                 for v in self.y_classes:
                     idx_true = (y == v) * (sensitive == u)
-                    expected_values_list.append(out[idx_true].mean())
+                    if torch.sum(idx_true.type(torch.FloatTensor)) == 0:
+                        expected_values_list.append(out.mean() * 0)
+                    else:
+                        expected_values_list.append(out[idx_true].mean())
 
             for v in self.y_classes:
                 idx_true = y == v
-                expected_values_list.append(out[idx_true].mean())
+                if torch.sum(idx_true.type(torch.FloatTensor)) == 0:
+                    expected_values_list.append(out.mean() * 0)
+                else:
+                    expected_values_list.append(out[idx_true].mean())
 
         elif self.fairness == 'dp':
             sensitive = sensitive.view(out.shape)
@@ -301,13 +308,16 @@ class Context(nn.Module):
         return avg_context_vector, pred_vec
 
 class Constraint(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, fair):
         super().__init__()
 
-        self.register_parameter(name='lmbda', param=torch.nn.Parameter(torch.rand((4,1))))
+        self.fair = fair
+        if self.fair == 'dp':
+            self.register_parameter(name='lmbda', param=torch.nn.Parameter(torch.rand((4,1))))
+        elif self.fair == 'eo':
+            self.register_parameter(name='lmbda', param=torch.nn.Parameter(torch.rand((8,1))))
 
     def forward(self, value):
-
         with torch.no_grad():
             self.lmbda.data = self.lmbda.data.clamp(min=0, max=(np.linalg.norm(self.lmbda.data.cpu().numpy()) + (1/.05)))
 
