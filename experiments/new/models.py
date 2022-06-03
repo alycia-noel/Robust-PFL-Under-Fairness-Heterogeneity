@@ -312,6 +312,7 @@ class Constraint(torch.nn.Module):
         super().__init__()
 
         self.fair = fair
+
         if self.fair == 'dp':
             self.register_parameter(name='lmbda', param=torch.nn.Parameter(torch.rand((4,1))))
         elif self.fair == 'eo':
