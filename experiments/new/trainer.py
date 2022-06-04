@@ -88,7 +88,7 @@ def evaluate(nodes, num_nodes, hnet, models, cnets, num_features, loss, device, 
             if fair == 'none':
                 running_loss += loss(pred, y.unsqueeze(1)).item()
             else:
-                running_loss += (loss(pred, y.unsqueeze(1)) + alpha*constraint(m_mu_q).to(device)).item() / len(batch)
+                running_loss += ((loss(pred, y.unsqueeze(1)) + alpha*constraint(m_mu_q).to(device)).item()) / len(batch)
 
             correct = torch.eq(pred_thresh,y.unsqueeze(1)).type(torch.cuda.LongTensor)
             running_correct += torch.count_nonzero(correct).item()
@@ -122,13 +122,12 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
     all_eod = [[] for i in range(num_nodes)]
     all_spd = [[] for i in range(num_nodes)]
     all_times = []
-    models = [None for i in range(num_nodes)]
-    cnets = [None for i in range(num_nodes)]
-    combo_params = [None for i in range(num_nodes)]
-    constraints = [None for i in range(num_nodes)]
+    models = []
+    cnets = []
+    constraints = []
     client_fairness = []
-    client_optimizers = [None for i in range(num_nodes)]
-    combo_parameters = [None for i in range(num_nodes)]
+    client_optimizers = []
+    combo_parameters = []
 
     for i in range(1):
         seed_everything(0)
@@ -156,14 +155,15 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
         # Set models for all clients
         for i in range(num_nodes):
-            models[i] =  LR(input_size=num_features, bound=0.05, fairness=client_fairness[i])
-            cnets[i] = Context(input_size=num_features, context_vector_size=num_features, context_hidden_size=25)
-            constraints[i] = Constraint(fair=client_fairness[i])
+            models.append(LR(input_size=num_features, bound=0.05, fairness=client_fairness[i]))
+            cnets.append(Context(input_size=num_features, context_vector_size=num_features, context_hidden_size=25))
+            constraints.append(Constraint(fair=client_fairness[i]))
+            #constraints.append(Constraint())
             if fair == 'none':
-                combo_parameters[i] = list(models[i].parameters()) + list(cnets[i].parameters())
+                combo_parameters.append(list(models[i].parameters()) + list(cnets[i].parameters()))
             else:
-                combo_parameters[i] = list(models[i].parameters()) + list(cnets[i].parameters()) + list(constraints[i].parameters())
-            client_optimizers[i] = torch.optim.Adam(combo_parameters[i], lr=inner_lr, weight_decay=inner_wd)
+                combo_parameters.append(list(models[i].parameters()) + list(cnets[i].parameters()) + list(constraints[i].parameters()))
+            client_optimizers.append(torch.optim.Adam(combo_parameters[i], lr=inner_lr, weight_decay=inner_wd))
 
         device = "cpu"
         if torch.cuda.is_available():
@@ -183,7 +183,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
             model = models[node_id]
             cnet = cnets[node_id]
             constraint = constraints[node_id]
-            combo_params = combo_parameters[i]
+            combo_params = combo_parameters[node_id]
             model.to(device)
             cnet.to(device)
             constraint.to(device)
@@ -194,7 +194,6 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
             weights = hnet(node_c_i, torch.tensor([node_id], dtype=torch.long).to(device))
             model.load_state_dict(weights)
-
 
             inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
 
@@ -330,8 +329,8 @@ def main():
     parser.add_argument("--eval_every", type=int, default=50, help="eval every X selected epochs")
     parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results", help="dir path for output file")
     parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="dp", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=1, help="fairness/accuracy trade-off parameter")
+    parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
+    parser.add_argument("--alpha", type=int, default=80, help="fairness/accuracy trade-off parameter")
     parser.add_argument("--which_position", type=int, default=8, choices=[5,8], help="which position the sensitive attribute is in. 5: compas, 8: adult")
     args = parser.parse_args()
     assert args.gpu <= torch.cuda.device_count()

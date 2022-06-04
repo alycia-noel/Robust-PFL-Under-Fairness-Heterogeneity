@@ -190,7 +190,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
             model = models[node_id]
             cnet = cnets[node_id]
             constraint = constraints[node_id]
-            combo_params = combo_parameters[i]
+            combo_params = combo_parameters[node_id]
             model.to(device)
             cnet.to(device)
 
