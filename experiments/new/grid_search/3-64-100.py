@@ -132,7 +132,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
     client_optimizers = [None for i in range(num_nodes)]
     combo_parameters = [None for i in range(num_nodes)]
 
-    save_file_name = "/home/ancarey/FairFLHN/experiments/new/grid_search/results/3_64_100.txt"
+    save_file_name = "/home/ancarey/FairFLHN/experiments/new/grid_search/results_adult/3_64_100.txt"
 
     for i in range(1):
         seed_everything(0)
@@ -313,7 +313,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
 def main():
 
-    file = open("/home/ancarey/FairFLHN/experiments/new/grid_search/results/3_64_100.txt", "w")
+    file = open("/home/ancarey/FairFLHN/experiments/new/grid_search/results_adult/3_64_100.txt", "w")
     file.close()
 
     client_lr = [1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2]
@@ -330,7 +330,7 @@ def main():
 
                 parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-                parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
+                parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
                 parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
                 parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
                 parser.add_argument("--num_steps", type=int, default=2000)
@@ -349,7 +349,7 @@ def main():
                 parser.add_argument("--seed", type=int, default=0, help="seed value")
                 parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
                 parser.add_argument("--alpha", type=int, default=80, help="fairness/accuracy trade-off parameter")
-                parser.add_argument("--which_position", type=int, default=5, choices=[5,8], help="which position the sensitive attribute is in. 5: compas, 8: adult")
+                parser.add_argument("--which_position", type=int, default=8, choices=[5,8], help="which position the sensitive attribute is in. 5: compas, 8: adult")
                 parser.add_argument("--context_hidden_size", type=int, default = 100, choices=[25,50,100], help="size of hidden layers of context network")
 
                 args = parser.parse_args()
