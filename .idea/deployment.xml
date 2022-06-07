@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="ancarey@sailor.ddns.uark.edu:22" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
-    <option name="confirmBeforeUploading" value="false" />
+  <component name="PublishConfigData" autoUpload="Always" remoteFilesAllowedToDisappearOnAutoupload="false">
     <serverData>
-      <paths name="ancarey@sailor.ddns.uark.edu:22">
+      <paths name="ancarey@sailor.ddns.uark.edu:22 (3)">
         <serverdata>
           <mappings>
-            <mapping deploy="/home/ancarey/FairFLHN" local="$PROJECT_DIR$" />
+            <mapping deploy="/FairFLHN" local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>
