@@ -131,9 +131,9 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
         nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node)
         num_features = len(nodes.features)
-        #embed_dim = num_features
+        embed_dim = num_features
 
-        embed_dim = int(1 + num_nodes / 4)
+        #embed_dim = int(1 + num_nodes / 4)
 
         # set fairness for all clients
         if fair == 'dp':
@@ -158,7 +158,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
         # Set models for all clients
         for i in range(num_nodes):
-            models[i] = LR(input_size=num_features, bound=0.01, fairness=client_fairness[i])
+            models[i] = LR(input_size=num_features, bound=0.05, fairness=client_fairness[i])
             constraints[i] = Constraint(fair=client_fairness[i])
             if fair == 'none':
                 combo_parameters[i] = list(models[i].parameters())
