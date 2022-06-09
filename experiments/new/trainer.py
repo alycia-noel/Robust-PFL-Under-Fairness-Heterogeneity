@@ -128,6 +128,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
     client_fairness = []
     client_optimizers = []
     combo_parameters = []
+    alphas = []
 
     for i in range(1):
         seed_everything(0)
@@ -139,17 +140,21 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
         # set fairness for all clients
         if fair == 'dp':
             client_fairness = ['dp' for i in range(num_nodes)]
+            alphas = [alpha[0] for i in range(num_nodes)]
         elif fair == 'eo':
             client_fairness = ['eo' for i in range(num_nodes)]
+            alphas = [alpha[1] for i in range(num_nodes)]
         elif fair == 'both':
             for i in range(num_nodes):
                 if i % 2 == 0:
                     client_fairness.append('dp')
+                    alphas.append(alpha[0])
                 else:
                     client_fairness.append('eo')
+                    alphas.append(alpha[1])
         elif fair == 'none':
             client_fairness = ['none' for i in range(num_nodes)]
-
+            alphas = ['none' for i in range(num_nodes)]
         hnet = LRHyper(device=device, n_nodes=num_nodes, embedding_dim=embed_dim, context_vector_size=num_features,
                        hidden_size=num_features, hnet_hidden_dim=hyper_hid, hnet_n_hidden=n_hidden)
 
@@ -184,6 +189,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
             cnet = cnets[node_id]
             constraint = constraints[node_id]
             combo_params = combo_parameters[node_id]
+            alpha = alphas[node_id]
             model.to(device)
             cnet.to(device)
             constraint.to(device)
@@ -312,15 +318,15 @@ def main():
 
     parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-    parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
+    parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
     parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
     parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
     parser.add_argument("--num_steps", type=int, default=2000)
-    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
     parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
-    parser.add_argument("--inner_lr", type=float, default=.0001, help="learning rate for inner optimizer")
-    parser.add_argument("--lr", type=float, default=.00001, help="learning rate")
+    parser.add_argument("--inner_lr", type=float, default=.01, help="learning rate for inner optimizer")
+    parser.add_argument("--lr", type=float, default=.0001, help="learning rate")
     parser.add_argument("--wd", type=float, default=1e-10, help="weight decay")
     parser.add_argument("--inner_wd", type=float, default=1e-10, help="inner weight decay")
     parser.add_argument("--embed_dim", type=int, default=10, help="embedding dim")
@@ -329,9 +335,9 @@ def main():
     parser.add_argument("--eval_every", type=int, default=50, help="eval every X selected epochs")
     parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results", help="dir path for output file")
     parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="eo", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=25, help="fairness/accuracy trade-off parameter")
-    parser.add_argument("--which_position", type=int, default=8, choices=[5,8], help="which position the sensitive attribute is in. 5: compas, 8: adult")
+    parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"], help="whether to use fairness of not.")
+    parser.add_argument("--alpha", type=int, default=[750, 50], help="fairness/accuracy trade-off parameter. [dp, eo]")
+    parser.add_argument("--which_position", type=int, default=5, choices=[5,8], help="which position the sensitive attribute is in. 5: compas, 8: adult")
     args = parser.parse_args()
     assert args.gpu <= torch.cuda.device_count()
     set_logger()

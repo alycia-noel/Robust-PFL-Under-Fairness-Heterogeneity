@@ -329,7 +329,7 @@ def main():
 
                 parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-                parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
+                parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
                 parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
                 parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
                 parser.add_argument("--num_steps", type=int, default=2000)
