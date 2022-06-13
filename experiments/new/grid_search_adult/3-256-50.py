@@ -241,11 +241,11 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
             # if step % 99 == 0 or step == 1999 or step == 0:
             #     step_results, avg_loss, avg_acc_all, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, models, cnets, num_features, loss, device, confusion=False, fair=fair, constraint=constraints, alpha=alpha, which_position=which_position)
-            #
-            #     logging.info(f"\nStep: {step + 1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc_all:.4f}")
+
+                # logging.info(f"\nStep: {step + 1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc_all:.4f}")
 
         step_results, avg_loss, avg_acc_all, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, models, cnets, num_features, loss, device, confusion=False,fair=fair, constraint=constraints, alpha=alpha, which_position=which_position)
-        # logging.info(f"\n\nFinal Results | AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc_all:.4f}")
+        # logging.info(f"\nFinal Results | AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc_all:.4f}")
         avg_acc[0].append(avg_acc_all)
         for i in range(num_nodes):
             avg_acc[i + 1].append(all_acc[i])
@@ -261,7 +261,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
 
 def main():
-    file = open("/home/ancarey/FairFLHN/experiments/new/grid_search/results/3_32_50.txt", "w")
+    file = open("/home/ancarey/FairFLHN/experiments/new/grid_search_adult/results/3_256_50.txt", "w")
     file.close()
 
     client_lr = [1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2]
@@ -278,11 +278,11 @@ def main():
 
                 parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-                parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
+                parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
                 parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
                 parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
                 parser.add_argument("--num_steps", type=int, default=2000)
-                parser.add_argument("--batch_size", type=int, default=32)
+                parser.add_argument("--batch_size", type=int, default=256)
                 parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
                 parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
                 parser.add_argument("--inner_lr", type=float, default=clr, help="learning rate for inner optimizer")
@@ -291,7 +291,7 @@ def main():
                 parser.add_argument("--inner_wd", type=float, default=w, help="inner weight decay")
                 parser.add_argument("--embed_dim", type=int, default=10, help="embedding dim")
                 parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
-                parser.add_argument("--gpu", type=int, default=2, help="gpu device ID")
+                parser.add_argument("--gpu", type=int, default=0, help="gpu device ID")
                 parser.add_argument("--eval_every", type=int, default=50, help="eval every X selected epochs")
                 parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results",
                                     help="dir path for output file")
@@ -299,16 +299,16 @@ def main():
                 parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"],
                                     help="whether to use fairness of not.")
                 parser.add_argument("--alpha", type=int, default=[125, 50], help="fairness/accuracy trade-off parameter")
-                parser.add_argument("--which_position", type=int, default=5, choices=[5, 8],
+                parser.add_argument("--which_position", type=int, default=8, choices=[5, 8],
                                     help="which position the sensitive attribute is in. 5: compas, 8: adult")
                 parser.add_argument("--context_hidden_size", type=int, default=50, choices=[25, 50, 100],
                                     help="size of hidden layers of context network")
-                parser.add_argument("--save_file_name", type=str, default="/home/ancarey/FairFLHN/experiments/new/grid_search/results/3_32_50.txt")
+                parser.add_argument("--save_file_name", type=str, default="/home/ancarey/FairFLHN/experiments/new/grid_search_adult/results/3_256_50.txt")
 
                 args = parser.parse_args()
                 set_logger()
 
-                device = "cuda:2"
+                device = "cuda:7"
 
                 args.classes_per_node = 2
 

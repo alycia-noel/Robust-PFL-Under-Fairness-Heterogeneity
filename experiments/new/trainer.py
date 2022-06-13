@@ -170,10 +170,6 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
                 combo_parameters.append(list(models[i].parameters()) + list(cnets[i].parameters()) + list(constraints[i].parameters()))
             client_optimizers.append(torch.optim.Adam(combo_parameters[i], lr=inner_lr, weight_decay=inner_wd))
 
-        device = "cpu"
-        if torch.cuda.is_available():
-            device = "cuda:5"
-
         hnet.to(device)
 
         optimizer = torch.optim.Adam(params=hnet.parameters(), lr=lr, weight_decay=wd)
@@ -245,11 +241,11 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
             optimizer.step()
 
-            if step % 99 == 0 or step == 1999 or step == 0:
-                step_results, avg_loss, avg_acc_all, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, models, cnets, num_features, loss, device, confusion=False, fair=fair, constraint=constraints, alpha=alpha, which_position=which_position)
-
-                logging.info(f"\nStep: {step + 1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc_all:.4f}")
-                # writer.add_scalars('testing accuracy', {
+            # if step % 99 == 0 or step == 1999 or step == 0:
+            #     step_results, avg_loss, avg_acc_all, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, num_nodes, hnet, models, cnets, num_features, loss, device, confusion=False, fair=fair, constraint=constraints, alpha=alpha, which_position=which_position)
+            #
+            #     logging.info(f"\nStep: {step + 1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc_all:.4f}")
+            #     # writer.add_scalars('testing accuracy', {
                 #     'average': avg_acc,
                 #     'client 1': all_acc[0],
                 #     'client 2': all_acc[1],
@@ -318,15 +314,15 @@ def main():
 
     parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-    parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
+    parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
     parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
     parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
     parser.add_argument("--num_steps", type=int, default=2000)
-    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
     parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
-    parser.add_argument("--inner_lr", type=float, default=.0001, help="learning rate for inner optimizer")
-    parser.add_argument("--lr", type=float, default=.00001, help="learning rate")
+    parser.add_argument("--inner_lr", type=float, default=.001, help="learning rate for inner optimizer")
+    parser.add_argument("--lr", type=float, default=.0001, help="learning rate")
     parser.add_argument("--wd", type=float, default=1e-10, help="weight decay")
     parser.add_argument("--inner_wd", type=float, default=1e-10, help="inner weight decay")
     parser.add_argument("--embed_dim", type=int, default=10, help="embedding dim")
@@ -338,14 +334,14 @@ def main():
     parser.add_argument("--seed", type=int, default=0, help="seed value")
     parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"],
                         help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=[125, 50], help="fairness/accuracy trade-off parameter")
-    parser.add_argument("--which_position", type=int, default=8, choices=[5, 8],
+    parser.add_argument("--alpha", type=int, default=[25, 200], help="fairness/accuracy trade-off parameter")
+    parser.add_argument("--which_position", type=int, default=5, choices=[5, 8],
                         help="which position the sensitive attribute is in. 5: compas, 8: adult")
     args = parser.parse_args()
     assert args.gpu <= torch.cuda.device_count()
     set_logger()
 
-    device = get_device(gpus=args.gpu)
+    device = "cuda:1"
 
     args.classes_per_node = 2
 
