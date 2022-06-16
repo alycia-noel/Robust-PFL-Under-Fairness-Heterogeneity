@@ -314,9 +314,9 @@ def main():
     parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results",
                         help="dir path for output file")
     parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"],
+    parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"],
                         help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=[25,200], help="fairness/accuracy trade-off parameter")
+    parser.add_argument("--alpha", type=int, default=[100,25], help="fairness/accuracy trade-off parameter")
     parser.add_argument("--which_position", type=int, default=8, choices=[5, 8],
                         help="which position the sensitive attribute is in. 5: compas, 8: adult")
     args = parser.parse_args()

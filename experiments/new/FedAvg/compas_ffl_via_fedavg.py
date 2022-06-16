@@ -1,67 +1,91 @@
 import time
 import argparse
 import warnings
-import torch
-import numpy as np
-import random
-import logging
-from tqdm import trange
+import os
 import torch.nn as nn
-from collections import defaultdict
-from experiments.new.utils import seed_everything, metrics, TP_FP_TN_FN, set_logger, get_device
-from experiments.new.models import LR
-from experiments.new.node import BaseNodes
-from fairtorch import DemographicParityLoss, EqualiedOddsLoss
-warnings.filterwarnings("ignore")
+os.environ['CUDA_VISIBLE_DEVICES'] = "1, 2, 3, 4, 5, 6, 7"
+import argparse
+import logging
+import random
+import warnings
+from collections import OrderedDict, defaultdict
+import numpy as np
+import torch
 import pandas as pd
+import torch.utils.data
+from tqdm import trange
+from experiments.new.models import LR, Context, LRHyper, Constraint
+from experiments.new.node import BaseNodes
+from experiments.new.utils import get_device, seed_everything, set_logger, TP_FP_TN_FN, metrics, make_ascent
+from torch.utils.tensorboard import SummaryWriter
+import matplotlib.pyplot as plt
+import seaborn as sn
 
-def eval_model(nodes, model, num_nodes, loss, device, fair, fair_loss, which_position):
-    curr_results, queries, pred, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd = evaluate(nodes, model, num_nodes, loss, device, fair, fair_loss, which_position)
+def eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, confusion, which_position):
+    curr_results, pred, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd = evaluate(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, which_position)
     total_correct = sum([val['correct'] for val in curr_results.values()])
     total_samples = sum([val['total'] for val in curr_results.values()])
     avg_loss = np.mean([val['loss'] for val in curr_results.values()])
+
     avg_acc = total_correct / total_samples
 
     all_acc = [val['correct'] / val['total'] for val in curr_results.values()]
     all_loss = [val['loss'] for val in curr_results.values()]
 
-    tp, fp, tn, fn = TP_FP_TN_FN(queries, pred, true, which_position)
+    if confusion:
 
-    f1_score_prediction, f1_female, f1_male, accuracy, f_acc, m_acc, AOD, EOD, SPD = metrics(tp, fp, tn, fn)
-
-    return curr_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd, AOD, EOD, SPD
+        for i in range(len(pred)):
+            actual = pd.Series(true[i], name='Actual')
+            prediction = pd.Series(pred[i], name='Predicted')
+            confusion = pd.crosstab(actual, prediction)
+            print(confusion)
+            plt.figure(figsize=(12, 7))
+            sn.heatmap(confusion, annot=True)
+            title = 'Confusion Matrix for Client ' + str(i + 1)
+            plt.title(title)
+            plt.show()
+    return curr_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd
 
 @torch.no_grad()
-def evaluate(nodes, model, num_samples, loss, device, fair, fair_loss, which_position):
-    model.eval()
+def evaluate(nodes, num_nodes, hnet, models, cnets, num_features, loss, device, fair, constraints, alpha, which_position):
+    hnet.eval()
     results = defaultdict(lambda: defaultdict(list))
     preds = []
     true = []
-    queries = []
     f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd = [], [], [], [], [], [], [], [], []
 
-    for node_id in range(num_samples):
+    for node_id in range(num_nodes):
         pred_client = []
         true_client = []
         queries_client = []
+        model = models[node_id]
+        constraint = constraints[node_id]
+
+        model.to(device)
+        constraint.to(device)
 
         running_loss, running_correct, running_samples = 0, 0, 0
 
         curr_data = nodes.test_loaders[node_id]
 
         for batch_count, batch in enumerate(curr_data):
-            x, y = tuple((t.type(torch.FloatTensor)) for t in batch)
+            x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
+            s = x[:, which_position].to(device)
+
             true_client.extend(y.cpu().numpy())
             queries_client.extend(x.cpu().numpy())
 
-            pred = model(x)
-            pred_prob = torch.sigmoid(pred)
-            pred_thresh = (pred_prob > 0.5).long()
+            pred, m_mu_q = model(x, s, y) # y is only passed to calculate m_mu_q
+
+            pred_thresh = (pred > 0.5).long()
             pred_client.extend(pred_thresh.flatten().cpu().numpy())
 
-            running_loss += loss(pred, y.unsqueeze(1)).item()
+            if fair == 'none':
+                running_loss += loss(pred, y.unsqueeze(1)).item()
+            else:
+                running_loss += ((loss(pred, y.unsqueeze(1)) + alpha*constraint(m_mu_q).to(device)).item()) / len(batch)
 
-            correct = torch.eq(pred_thresh, y.unsqueeze(1)).type(torch.cuda.LongTensor)
+            correct = torch.eq(pred_thresh,y.unsqueeze(1)).type(torch.cuda.LongTensor)
             running_correct += torch.count_nonzero(correct).item()
 
             running_samples += len(y)
@@ -78,15 +102,13 @@ def evaluate(nodes, model, num_samples, loss, device, fair, fair_loss, which_pos
         aod.append(AOD)
         eod.append(EOD)
         spd.append(SPD)
-        results[node_id]['loss'] = running_loss / (batch_count + 1)
+        results[node_id]['loss'] = running_loss
         results[node_id]['correct'] = running_correct
         results[node_id]['total'] = running_samples
-        queries.extend(queries_client)
-        preds.extend(pred_client)
-        true.extend(true_client)
+        preds.append(pred_client)
+        true.append(true_client)
 
-    return results, queries, preds, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd
-
+    return results, preds, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd
 
 def send_main_model_to_nodes_and_update_model_dict(main_model, model_dict, number_of_samples, number_of_clients_per_round, name_of_models):
     sampled = []
@@ -105,40 +127,50 @@ def send_main_model_to_nodes_and_update_model_dict(main_model, model_dict, numbe
 def create_model_optimizer_criterion_dict(number_of_samples, fair, alpha, m, learning_rate, wd, num_features):
     model_dict = dict()
     optimizer_dict = dict()
+    constraint_dict = dict()
     criterion_dict = dict()
     fair_loss_dict = dict()
 
     for i in range(number_of_samples):
         model_name = "model" + str(i)
-        if m == "LR":
-            model_info = LR(input_size=num_features)
-
+        model_info = LR(input_size=num_features, bound=.05, fairness=fair)
         model_dict.update({model_name: model_info})
 
+        constraint_name = "constraint" + str(i)
+        constraint_info = Constraint(fair=fair)
+        constraint_dict.update({constraint_name: constraint_info})
+
+        if fair == 'none':
+            combo_parameters = (list(model_info[i].parameters()))
+        else:
+            combo_parameters.append(
+                list(model_info[i].parameters()) + list(constraint_info[i].parameters()))
+
         optimizer_name = "optimizer" + str(i)
-        optimizer_info = torch.optim.Adam(model_info.parameters(), lr=learning_rate, weight_decay=wd)
+        optimizer_info = torch.optim.Adam(combo_parameters, lr=learning_rate, weight_decay=wd)
         optimizer_dict.update({optimizer_name: optimizer_info})
 
         criterion_name = "criterion" + str(i)
-        criterion_info = nn.BCEWithLogitsLoss(reduction='mean')
+        criterion_info = nn.BCELoss(reduction='mean')
         criterion_dict.update({criterion_name: criterion_info})
 
         if fair == "dp":
             fair_loss_name = "fair_loss" + str(i)
-            fair_loss_info = DemographicParityLoss(sensitive_classes=[0, 1], alpha=alpha)
+            fair_loss_info = 'dp'
             fair_loss_dict.update({fair_loss_name: fair_loss_info})
         elif fair == "eo":
             fair_loss_name = "fair_loss" + str(i)
-            fair_loss_info = EqualiedOddsLoss(sensitive_classes=[0, 1], alpha=alpha)
+            fair_loss_info = 'eo'
             fair_loss_dict.update({fair_loss_name: fair_loss_info})
 
     return model_dict, optimizer_dict, criterion_dict, fair_loss_dict
 
 
-def start_train_end_node_process_print_some(device,sampled, model_dict, name_of_models, criterion_dict, name_of_criterions, optimizer_dict, name_of_optimizers, fair_loss_dict, name_of_fair_loss, num_epoch, nodes, fair, which_position):
+def start_train_end_node_process_print_some(device,sampled, constraint_dict, name_of_constraint, model_dict, name_of_models, criterion_dict, name_of_criterions, optimizer_dict, name_of_optimizers, fair_loss_dict, name_of_fair_loss, num_epoch, nodes, fair, which_position):
     for i, client in enumerate(sampled):
         model = model_dict[name_of_models[client]]
         criterion = criterion_dict[name_of_criterions[client]]
+        constraint = constraint_dict[name_of_constraint[client]]
         optimizer = optimizer_dict[name_of_optimizers[client]]
         if fair != "none":
             fair_loss = fair_loss_dict[name_of_fair_loss[client]]

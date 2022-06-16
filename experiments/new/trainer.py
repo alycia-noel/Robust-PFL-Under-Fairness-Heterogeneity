@@ -127,6 +127,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
     constraints = []
     client_fairness = []
     client_optimizers = []
+    client_losses = []
     combo_parameters = []
     alphas = []
 
@@ -169,11 +170,11 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
             else:
                 combo_parameters.append(list(models[i].parameters()) + list(cnets[i].parameters()) + list(constraints[i].parameters()))
             client_optimizers.append(torch.optim.Adam(combo_parameters[i], lr=inner_lr, weight_decay=inner_wd))
-
+            client_losses.append(torch.nn.BCELoss())
         hnet.to(device)
 
         optimizer = torch.optim.Adam(params=hnet.parameters(), lr=lr, weight_decay=wd)
-        loss = torch.nn.BCELoss()
+
         step_iter = trange(steps)
 
         for step in step_iter:
@@ -186,6 +187,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
             constraint = constraints[node_id]
             combo_params = combo_parameters[node_id]
             alpha = alphas[node_id]
+            loss = client_losses[node_id]
             model.to(device)
             cnet.to(device)
             constraint.to(device)
@@ -332,9 +334,9 @@ def main():
     parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results",
                         help="dir path for output file")
     parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"],
+    parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"],
                         help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=[25, 200], help="fairness/accuracy trade-off parameter")
+    parser.add_argument("--alpha", type=int, default=[100, 25], help="fairness/accuracy trade-off parameter")
     parser.add_argument("--which_position", type=int, default=8, choices=[5, 8],
                         help="which position the sensitive attribute is in. 5: compas, 8: adult")
     args = parser.parse_args()
