@@ -1,68 +1,45 @@
-import time
-import argparse
-import warnings
 import os
 import torch.nn as nn
 os.environ['CUDA_VISIBLE_DEVICES'] = "1, 2, 3, 4, 5, 6, 7"
 import argparse
 import logging
 import random
-import warnings
-from collections import OrderedDict, defaultdict
-import numpy as np
+from collections import defaultdict
 import torch
 import pandas as pd
 import torch.utils.data
 from tqdm import trange
-from experiments.new.models import LR, Context, LRHyper, Constraint
-from experiments.new.node import BaseNodes
-from experiments.new.utils import get_device, seed_everything, set_logger, TP_FP_TN_FN, metrics, make_ascent
-from torch.utils.tensorboard import SummaryWriter
-import matplotlib.pyplot as plt
-import seaborn as sn
+from experiments.new.pFedHN.pFedHN_models import LR, Constraint
+from experiments.new.cFHN.node import BaseNodes
+from experiments.new.cFHN.utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
 
-def eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, confusion, which_position):
-    curr_results, pred, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd = evaluate(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, which_position)
+
+def eval_model(nodes, model, num_nodes,  device, which_position):
+    curr_results, pred, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd = evaluate(nodes, num_nodes, model, device, which_position)
     total_correct = sum([val['correct'] for val in curr_results.values()])
     total_samples = sum([val['total'] for val in curr_results.values()])
-    avg_loss = np.mean([val['loss'] for val in curr_results.values()])
 
     avg_acc = total_correct / total_samples
 
     all_acc = [val['correct'] / val['total'] for val in curr_results.values()]
-    all_loss = [val['loss'] for val in curr_results.values()]
 
-    if confusion:
-
-        for i in range(len(pred)):
-            actual = pd.Series(true[i], name='Actual')
-            prediction = pd.Series(pred[i], name='Predicted')
-            confusion = pd.crosstab(actual, prediction)
-            print(confusion)
-            plt.figure(figsize=(12, 7))
-            sn.heatmap(confusion, annot=True)
-            title = 'Confusion Matrix for Client ' + str(i + 1)
-            plt.title(title)
-            plt.show()
-    return curr_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd
+    return curr_results, avg_acc, all_acc, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd
 
 @torch.no_grad()
-def evaluate(nodes, num_nodes, hnet, models, cnets, num_features, loss, device, fair, constraints, alpha, which_position):
-    hnet.eval()
+def evaluate(nodes, num_nodes, model, device, which_position):
+    model.eval()
+    model.to(device)
+
     results = defaultdict(lambda: defaultdict(list))
     preds = []
     true = []
+
     f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd = [], [], [], [], [], [], [], [], []
 
     for node_id in range(num_nodes):
         pred_client = []
         true_client = []
         queries_client = []
-        model = models[node_id]
-        constraint = constraints[node_id]
-
-        model.to(device)
-        constraint.to(device)
 
         running_loss, running_correct, running_samples = 0, 0, 0
 
@@ -75,15 +52,10 @@ def evaluate(nodes, num_nodes, hnet, models, cnets, num_features, loss, device, 
             true_client.extend(y.cpu().numpy())
             queries_client.extend(x.cpu().numpy())
 
-            pred, m_mu_q = model(x, s, y) # y is only passed to calculate m_mu_q
+            pred = model(x, s, y, 'test') # y is only passed to calculate m_mu_q
 
             pred_thresh = (pred > 0.5).long()
             pred_client.extend(pred_thresh.flatten().cpu().numpy())
-
-            if fair == 'none':
-                running_loss += loss(pred, y.unsqueeze(1)).item()
-            else:
-                running_loss += ((loss(pred, y.unsqueeze(1)) + alpha*constraint(m_mu_q).to(device)).item()) / len(batch)
 
             correct = torch.eq(pred_thresh,y.unsqueeze(1)).type(torch.cuda.LongTensor)
             running_correct += torch.count_nonzero(correct).item()
@@ -102,7 +74,6 @@ def evaluate(nodes, num_nodes, hnet, models, cnets, num_features, loss, device, 
         aod.append(AOD)
         eod.append(EOD)
         spd.append(SPD)
-        results[node_id]['loss'] = running_loss
         results[node_id]['correct'] = running_correct
         results[node_id]['total'] = running_samples
         preds.append(pred_client)
@@ -130,50 +101,69 @@ def create_model_optimizer_criterion_dict(number_of_samples, fair, alpha, m, lea
     constraint_dict = dict()
     criterion_dict = dict()
     fair_loss_dict = dict()
+    combo_param_dict = dict()
 
     for i in range(number_of_samples):
-        model_name = "model" + str(i)
-        model_info = LR(input_size=num_features, bound=.05, fairness=fair)
-        model_dict.update({model_name: model_info})
-
-        constraint_name = "constraint" + str(i)
-        constraint_info = Constraint(fair=fair)
-        constraint_dict.update({constraint_name: constraint_info})
-
-        if fair == 'none':
-            combo_parameters = (list(model_info[i].parameters()))
-        else:
-            combo_parameters.append(
-                list(model_info[i].parameters()) + list(constraint_info[i].parameters()))
-
-        optimizer_name = "optimizer" + str(i)
-        optimizer_info = torch.optim.Adam(combo_parameters, lr=learning_rate, weight_decay=wd)
-        optimizer_dict.update({optimizer_name: optimizer_info})
-
-        criterion_name = "criterion" + str(i)
-        criterion_info = nn.BCELoss(reduction='mean')
-        criterion_dict.update({criterion_name: criterion_info})
-
+        fair_loss_name = "fair_loss" + str(i)
         if fair == "dp":
-            fair_loss_name = "fair_loss" + str(i)
             fair_loss_info = 'dp'
             fair_loss_dict.update({fair_loss_name: fair_loss_info})
         elif fair == "eo":
-            fair_loss_name = "fair_loss" + str(i)
             fair_loss_info = 'eo'
             fair_loss_dict.update({fair_loss_name: fair_loss_info})
+        elif fair == "both":
+            if i % 2 == 0:
+                fair_loss_info = 'dp'
+                fair_loss_dict.update({fair_loss_name: fair_loss_info})
+            else:
+                fair_loss_info = 'eo'
+                fair_loss_dict.update({fair_loss_name: fair_loss_info})
 
-    return model_dict, optimizer_dict, criterion_dict, fair_loss_dict
+        model_name = "model" + str(i)
+        model_info = LR(input_size=num_features, bound=.05, fairness=fair_loss_info)
+        model_dict.update({model_name: model_info})
+
+        constraint_name = "constraint" + str(i)
+        constraint_info = Constraint(fair=fair_loss_info)
+        constraint_dict.update({constraint_name: constraint_info})
+
+        if fair == 'none':
+            combo_param_name = "combo-param" + str(i)
+            combo_param_info = list(model_info.parameters())
+            combo_param_dict.update({combo_param_name: combo_param_info})
+        else:
+            combo_param_name = "combo-param" + str(i)
+            combo_param_info = list(model_info.parameters()) + list(constraint_info.parameters())
+            combo_param_dict.update({combo_param_name: combo_param_info})
+
+        optimizer_name = "optimizer" + str(i)
+        optimizer_info = torch.optim.Adam(combo_param_info, lr=learning_rate, weight_decay=wd)
+        optimizer_dict.update({optimizer_name: optimizer_info})
+
+        criterion_name = "criterion" + str(i)
+        criterion_info = nn.BCELoss()
+        criterion_dict.update({criterion_name: criterion_info})
+
+    return model_dict, optimizer_dict, criterion_dict, fair_loss_dict, combo_param_dict, constraint_dict
 
 
-def start_train_end_node_process_print_some(device,sampled, constraint_dict, name_of_constraint, model_dict, name_of_models, criterion_dict, name_of_criterions, optimizer_dict, name_of_optimizers, fair_loss_dict, name_of_fair_loss, num_epoch, nodes, fair, which_position):
+def start_train_end_node_process_print_some(alphas, combo_params_dict, name_of_combo_params, device, sampled, constraint_dict, name_of_constraint, model_dict, name_of_models, criterion_dict, name_of_criterions, optimizer_dict, name_of_optimizers, fair_loss_dict, name_of_fair_loss, num_epoch, nodes, fair, which_position):
     for i, client in enumerate(sampled):
         model = model_dict[name_of_models[client]]
         criterion = criterion_dict[name_of_criterions[client]]
         constraint = constraint_dict[name_of_constraint[client]]
         optimizer = optimizer_dict[name_of_optimizers[client]]
+        combo_params = combo_params_dict[name_of_combo_params[client]]
+
         if fair != "none":
             fair_loss = fair_loss_dict[name_of_fair_loss[client]]
+        else:
+            fair_loss = 'none'
+
+        if fair_loss == 'dp':
+            alpha = alphas[0]
+        elif fair_loss == 'eo':
+            alpha = alphas[1]
 
         for epoch in range(num_epoch):
             batch = next(iter(nodes.train_loaders[client]))
@@ -184,16 +174,17 @@ def start_train_end_node_process_print_some(device,sampled, constraint_dict, nam
             optimizer.zero_grad()
 
             # train and update local
-            pred = model(x)
+            pred, m_mu_q = model(x, s, y, 'train')
 
-            if fair == 'none':
+            if fair_loss == 'none':
                 err = criterion(pred, y.unsqueeze(1))
             else:
-                fair = fair_loss(x, pred, s, y)
-                err = criterion(pred, y.unsqueeze(1)) + fair
+                err = criterion(pred, y.unsqueeze(1)) + alpha * constraint(m_mu_q)
 
             err.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 50)
+            if fair != 'none':
+                combo_params[len(combo_params) - 1].grad.data = -1 * combo_params[len(combo_params) - 1].grad.data
+
             optimizer.step()
 
 
@@ -228,49 +219,36 @@ def train(device, data_name,model_name,classes_per_node,num_nodes,steps,lr,wd,bs
 
     num_features = len(nodes.features)
 
-    times_all, roc_all = [], []
+    main_model = LR(input_size=num_features, bound=.05, fairness=fair)
 
-    if model_name == "LR":
-        main_model = LR(input_size=num_features)
-
-    loss = nn.BCEWithLogitsLoss(reduction='mean')
-
-    model_dict, optimizer_dict, criterion_dict, fair_loss_dict = create_model_optimizer_criterion_dict(num_nodes, fair, alpha, model_name, lr, wd, num_features)
+    model_dict, optimizer_dict, criterion_dict, fair_loss_dict, combo_param_dict, constraint_dict = create_model_optimizer_criterion_dict(num_nodes, fair, alpha, model_name, lr, wd, num_features)
 
     name_of_models = list(model_dict.keys())
     name_of_optimizers = list(optimizer_dict.keys())
     name_of_criterions = list(criterion_dict.keys())
     name_of_fair_loss = list(fair_loss_dict.keys())
+    name_of_combo_param = list(combo_param_dict.keys())
+    name_of_constraint = list(constraint_dict.keys())
 
     print('~' * 22)
     print('~~~ Start Training ~~~')
     print('~' * 22, '\n')
+
     step_iter = trange(steps)
 
     num_client_sample_per_round = 1
 
     for step in step_iter:
-        start = time.time()
         model_dict, sampled = send_main_model_to_nodes_and_update_model_dict(main_model, model_dict, num_nodes, num_client_sample_per_round, name_of_models)
-        start_train_end_node_process_print_some(device,sampled, model_dict, name_of_models, criterion_dict, name_of_criterions, optimizer_dict, name_of_optimizers, fair_loss_dict, name_of_fair_loss, inner_steps, nodes, fair, which_position)
+        start_train_end_node_process_print_some(alpha, combo_param_dict, name_of_combo_param, device, sampled, constraint_dict, name_of_constraint, model_dict, name_of_models, criterion_dict, name_of_criterions, optimizer_dict, name_of_optimizers, fair_loss_dict, name_of_fair_loss, inner_steps, nodes, fair, which_position)
         main_model = set_averaged_weights_as_main_model_weights_and_update_main_model(main_model, model_dict, sampled, name_of_models, num_client_sample_per_round)
-        end = time.time()
 
-        times_all.append(end - start)
-        if step % 49 == 0 or step == 1999 or step == 0:
-            curr_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd, _, _, _ = eval_model(
-                nodes=nodes, model=main_model, num_nodes=num_nodes, loss=loss, device=device, fair=fair,
-                fair_loss=fair_loss_dict, which_position=which_position)
-            logging.info(f"\nStep: {step + 1}, AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}")
-
-    curr_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd, aod_all, eod_all, spd_all = eval_model(
-        nodes=nodes, model=main_model, num_nodes=num_nodes, loss=loss, device=device, fair=fair,
-        fair_loss=fair_loss_dict, which_position=which_position)
-    logging.info(f"\n\nFinal Results | AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc:.4f}, AVG AOD: {aod_all:.4f}, AVG EOD: {eod_all:.4f}, AVG SPD: {spd_all}")
+    curr_results,  avg_acc, all_acc, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(nodes, main_model, num_nodes,  device, which_position)
+    logging.info(f"\n\nFinal Results |  AVG Acc: {avg_acc:.4f}")
     for i in range(num_nodes):
         print("\nClient", i + 1)
         print(i)
-        print(f"Acc: {all_acc[i]:.4f}, F Acc: {f_a[i]:.4f}, M Acc: {m_a[i]:.4f}, F1: {f1[i]:.4f}, AOD: {aod[i]:.4f}, EOD: {eod[i]:.4f}, SPD: {spd[i]:.4f}")
+        print(f"Acc: {all_acc[i]:.4f}, F1: {f1[i]:.4f}, AOD: {aod[i]:.4f}, EOD: {eod[i]:.4f}, SPD: {spd[i]:.4f}")
 
 
 def main():
@@ -281,15 +259,15 @@ def main():
     parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
     parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
     parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
-    parser.add_argument("--num_steps", type=int, default=2000)
+    parser.add_argument("--num_steps", type=int, default=5000)
     parser.add_argument("--inner_steps", type=int, default=50)
-    parser.add_argument("--batch_size", type=int, default=512)
-    parser.add_argument("--lr", type=float, default=3e-3, help="learning rate")
-    parser.add_argument("--wd", type=float, default=1e-6, help="weight decay")
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--lr", type=float, default=.05, help="learning rate")
+    parser.add_argument("--wd", type=float, default=1e-10, help="weight decay")
     parser.add_argument("--gpu", type=int, default=4, help="gpu device ID")
-    parser.add_argument("--fair", type=str, default="eo", choices=["none", "eo", "dp", "both"],
+    parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"],
                         help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=150, help="fairness/accuracy trade-off parameter")
+    parser.add_argument("--alpha", type=int, default=[60,40], help="fairness/accuracy trade-off parameter")
     parser.add_argument("--which_position", type=int, default=5, choices=[5, 8],
                         help="which position the sensitive attribute is in. 5: compas, 8: adult")
 
@@ -297,7 +275,7 @@ def main():
     assert args.gpu <= torch.cuda.device_count()
     set_logger()
 
-    device = get_device(gpus=args.gpu)
+    device = 'cuda:4'
     args.class_per_node = 2
 
     train(

@@ -4,18 +4,16 @@ import argparse
 import logging
 import random
 import warnings
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 import numpy as np
 import torch
 import pandas as pd
 import torch.utils.data
 from tqdm import trange
-from experiments.new.decentralized.decentralized_models import LRHyper, LR, Constraint
-from experiments.new.node import BaseNodes
-from experiments.new.utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
+from experiments.new.pFedHN.pFedHN_models import LR, Constraint
+from experiments.new.cFHN.node import BaseNodes
+from experiments.new.cFHN.utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
 from torch.utils.tensorboard import SummaryWriter
-import matplotlib.pyplot as plt
-import seaborn as sn
 warnings.filterwarnings("ignore")
 
 def eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, confusion, which_position):
@@ -43,7 +41,7 @@ def evaluate(nodes, num_nodes, hnet, models, cnets, num_features, loss, device, 
         queries_client = []
         model = models[node_id]
         constraint = constraints[node_id]
-
+        model.eval()
         model.to(device)
         constraint.to(device)
 
@@ -112,7 +110,9 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
         nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node)
         num_features = len(nodes.features)
-        embed_dim = num_features
+        #embed_dim = num_features
+
+        embed_dim = int(1 + num_nodes / 4)
 
         # set fairness for all clients
         if fair == 'dp':
@@ -143,13 +143,12 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
                 combo_parameters[i] = list(models[i].parameters())  + list(constraints[i].parameters())
             client_optimizers[i] = torch.optim.Adam(combo_parameters[i], lr=inner_lr, weight_decay=inner_wd)
 
-
         loss = torch.nn.BCELoss()
         step_iter = trange(steps)
 
         for step in step_iter:
 
-            node_id = step
+            node_id = random.choice(range(num_nodes))
 
             # get client models and optimizers
             model = models[node_id]
@@ -161,7 +160,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
             inner_optim = client_optimizers[node_id]
 
-            for j in range(25000):
+            for j in range(inner_steps):
                 model.train()
                 inner_optim.zero_grad()
 
@@ -183,7 +182,6 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
                     combo_params[len(combo_params) - 1].grad.data = -1 * combo_params[len(combo_params) - 1].grad.data
 
                 inner_optim.step()
-
 
         step_results, avg_loss, avg_acc_all, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(
             nodes, num_nodes, None, models, None, num_features, loss, device, confusion=False, fair=fair,
@@ -213,15 +211,15 @@ def main():
 
     parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-    parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
+    parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
     parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
     parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
-    parser.add_argument("--num_steps", type=int, default=4)
+    parser.add_argument("--num_steps", type=int, default=5000)
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--inner_steps", type=int, default=25000, help="number of inner steps")
+    parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
     parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
-    parser.add_argument("--inner_lr", type=float, default=.0001, help="learning rate for inner optimizer")
-    parser.add_argument("--lr", type=float, default=1e-5, help="learning rate")
+    parser.add_argument("--inner_lr", type=float, default=.05, help="learning rate for inner optimizer")
+    parser.add_argument("--lr", type=float, default=5e-5, help="learning rate")
     parser.add_argument("--wd", type=float, default=1e-10, help="weight decay")
     parser.add_argument("--inner_wd", type=float, default=1e-10, help="inner weight decay")
     parser.add_argument("--embed_dim", type=int, default=10, help="embedding dim")
@@ -233,14 +231,14 @@ def main():
     parser.add_argument("--seed", type=int, default=0, help="seed value")
     parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"],
                         help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=[100,25], help="fairness/accuracy trade-off parameter")
+    parser.add_argument("--alpha", type=int, default=[1,1], help="fairness/accuracy trade-off parameter")
     parser.add_argument("--which_position", type=int, default=5, choices=[5, 8],
                         help="which position the sensitive attribute is in. 5: compas, 8: adult")
     args = parser.parse_args()
     assert args.gpu <= torch.cuda.device_count()
     set_logger()
 
-    device = "cuda:4"
+    device = "cuda:1"
 
     args.classes_per_node = 2
 

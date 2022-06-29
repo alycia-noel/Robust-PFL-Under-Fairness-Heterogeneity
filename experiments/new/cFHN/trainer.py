@@ -10,13 +10,13 @@ import torch
 import pandas as pd
 import torch.utils.data
 from tqdm import trange
-from experiments.new.models import LR, Context, LRHyper, Constraint
-from experiments.new.node import BaseNodes
-from experiments.new.utils import get_device, seed_everything, set_logger, TP_FP_TN_FN, metrics, make_ascent
+from experiments.new.cFHN.models import LR, Context, LRHyper, Constraint
+from experiments.new.cFHN.node import BaseNodes
+from experiments.new.cFHN.utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
 from torch.utils.tensorboard import SummaryWriter
 import matplotlib.pyplot as plt
 import seaborn as sn
-from fairtorch import DemographicParityLoss, EqualiedOddsLoss
+
 warnings.filterwarnings("ignore")
 
 def eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, confusion, which_position):
