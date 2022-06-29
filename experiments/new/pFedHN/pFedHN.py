@@ -10,13 +10,10 @@ import torch
 import pandas as pd
 import torch.utils.data
 from tqdm import trange
-from experiments.new.pFedHN.pFedHN_models import LRHyper, LR, Constraint
-from experiments.new.node import BaseNodes
-from experiments.new.utils import get_device, seed_everything, set_logger, TP_FP_TN_FN, metrics
+from pFedHN_models import LRHyper, LR, Constraint
+from node import BaseNodes
+from utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
 from torch.utils.tensorboard import SummaryWriter
-import matplotlib.pyplot as plt
-import seaborn as sn
-from fairtorch import DemographicParityLoss, EqualiedOddsLoss
 warnings.filterwarnings("ignore")
 
 def eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, confusion, which_position):
@@ -28,19 +25,6 @@ def eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, 
 
     all_acc = [val['correct'] / val['total'] for val in curr_results.values()]
     all_loss = [val['loss'] for val in curr_results.values()]
-
-    if confusion:
-
-        for i in range(len(pred)):
-            actual = pd.Series(true[i], name='Actual')
-            prediction = pd.Series(pred[i], name='Predicted')
-            confusion = pd.crosstab(actual, prediction)
-            print(confusion)
-            plt.figure(figsize=(12, 7))
-            sn.heatmap(confusion, annot=True)
-            title = 'Confusion Matrix for Client ' + str(i + 1)
-            plt.title(title)
-            plt.show()
 
     return curr_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd
 
@@ -77,7 +61,6 @@ def evaluate(nodes, num_nodes, hnet, models, cnets, num_features, loss, device, 
             model.load_state_dict(weights)
 
             pred, m_mu_q = model(x, s, y)
-            # pred_prob = torch.sigmoid(pred)
             pred_thresh = (pred > 0.5).long()
             pred_client.extend(pred_thresh.flatten().cpu().numpy())
 
@@ -131,9 +114,9 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
         nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node)
         num_features = len(nodes.features)
-        embed_dim = num_features
+        #embed_dim = num_features
 
-        #embed_dim = int(1 + num_nodes / 4)
+        embed_dim = int(1 + num_nodes / 4)
 
         # set fairness for all clients
         if fair == 'dp':
@@ -296,15 +279,15 @@ def main():
 
     parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-    parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
+    parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
     parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
     parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
-    parser.add_argument("--num_steps", type=int, default=2000)
-    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--num_steps", type=int, default=5000)
+    parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
     parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
-    parser.add_argument("--inner_lr", type=float, default=.0001, help="learning rate for inner optimizer")
-    parser.add_argument("--lr", type=float, default=1e-5, help="learning rate")
+    parser.add_argument("--inner_lr", type=float, default=.05, help="learning rate for inner optimizer")
+    parser.add_argument("--lr", type=float, default=5e-5, help="learning rate")
     parser.add_argument("--wd", type=float, default=1e-10, help="weight decay")
     parser.add_argument("--inner_wd", type=float, default=1e-10, help="inner weight decay")
     parser.add_argument("--embed_dim", type=int, default=10, help="embedding dim")
@@ -316,8 +299,8 @@ def main():
     parser.add_argument("--seed", type=int, default=0, help="seed value")
     parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"],
                         help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=[100,25], help="fairness/accuracy trade-off parameter")
-    parser.add_argument("--which_position", type=int, default=8, choices=[5, 8],
+    parser.add_argument("--alpha", type=int, default=[60,40], help="fairness/accuracy trade-off parameter")
+    parser.add_argument("--which_position", type=int, default=5, choices=[5, 8],
                         help="which position the sensitive attribute is in. 5: compas, 8: adult")
     args = parser.parse_args()
     assert args.gpu <= torch.cuda.device_count()

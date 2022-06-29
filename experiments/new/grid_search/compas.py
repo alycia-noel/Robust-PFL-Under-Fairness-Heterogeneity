@@ -226,77 +226,79 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
 
     file = open(save_file_name, "a")
-    file.write("\nAlpha: {0}, AVG Acc: {1:.4f}, C1 SPD: {2:.4f}, C2 SPD: {3:.4f}, C3 SPD: {4:.4f}, C4 SPD: {5:.4f}".format(alpha, np.mean(avg_acc[0]), np.mean(all_spd[0]), np.mean(all_spd[1]), np.mean(all_spd[2]), np.mean(all_spd[3])))
+    file.write("\nLR: {0}, HN LR: {1}, WD: {2}, AVG Acc: {3:.4f}".format(inner_lr, lr, wd, np.mean(avg_acc[0])))
     file.close()
 
 def main():
-    file = open("/home/ancarey/FairFLHN/experiments/new/grid_search/results/dp-compas.txt", "w")
+    file = open("/home/ancarey/FairFLHN/experiments/new/grid_search/results/compas.txt", "w")
     file.close()
 
-    alpha = [1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+    CLR = [1e-5, 3e-5, 5e-5, 1e-4, 3e-4, 5e-4, 1e-3, 3e-3, 5e-3, 1e-2, 3e-2, 5e-2]
+    HLR = [1e-5, 3e-5, 5e-5, 1e-4, 3e-4, 5e-4, 1e-3, 3e-3, 5e-3, 1e-2, 3e-2, 5e-2]
 
-    for i, a in enumerate(alpha):
+    for i, c in enumerate(CLR):
+        for j, h in enumerate(HLR):
+            pd.set_option('display.float_format', lambda x: '%.1f' % x)
 
-        pd.set_option('display.float_format', lambda x: '%.1f' % x)
+            writer = SummaryWriter('results')
 
-        writer = SummaryWriter('results')
+            parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-        parser = argparse.ArgumentParser(description="Fair Hypernetworks")
+            parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"],
+                                help="choice of dataset")
+            parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
+            parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
+            parser.add_argument("--num_steps", type=int, default=5000)
+            parser.add_argument("--batch_size", type=int, default=64)
+            parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
+            parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
+            parser.add_argument("--inner_lr", type=float, default=c, help="learning rate for inner optimizer")
+            parser.add_argument("--lr", type=float, default=h, help="learning rate")
+            parser.add_argument("--wd", type=float, default=1e-10, help="weight decay")
+            parser.add_argument("--inner_wd", type=float, default=1e-10, help="inner weight decay")
+            parser.add_argument("--embed_dim", type=int, default=10, help="embedding dim")
+            parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
+            parser.add_argument("--gpu", type=int, default=5, help="gpu device ID")
+            parser.add_argument("--eval_every", type=int, default=50, help="eval every X selected epochs")
+            parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results",
+                                help="dir path for output file")
+            parser.add_argument("--seed", type=int, default=0, help="seed value")
+            parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"],
+                                help="whether to use fairness of not.")
+            parser.add_argument("--alpha", type=int, default=[100, 100], help="fairness/accuracy trade-off parameter")
+            parser.add_argument("--which_position", type=int, default=5, choices=[5, 8],
+                                help="which position the sensitive attribute is in. 5: compas, 8: adult")
+            parser.add_argument("--save_file_name", type=str,
+                                default="/home/ancarey/FairFLHN/experiments/new/grid_search/results/compas.txt")
 
-        parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"],
-                            help="choice of dataset")
-        parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
-        parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
-        parser.add_argument("--num_steps", type=int, default=5000)
-        parser.add_argument("--batch_size", type=int, default=64)
-        parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
-        parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
-        parser.add_argument("--inner_lr", type=float, default=.05, help="learning rate for inner optimizer")
-        parser.add_argument("--lr", type=float, default=5e-5, help="learning rate")
-        parser.add_argument("--wd", type=float, default=1e-10, help="weight decay")
-        parser.add_argument("--inner_wd", type=float, default=1e-10, help="inner weight decay")
-        parser.add_argument("--embed_dim", type=int, default=10, help="embedding dim")
-        parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
-        parser.add_argument("--gpu", type=int, default=5, help="gpu device ID")
-        parser.add_argument("--eval_every", type=int, default=50, help="eval every X selected epochs")
-        parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results",
-                            help="dir path for output file")
-        parser.add_argument("--seed", type=int, default=0, help="seed value")
-        parser.add_argument("--fair", type=str, default="dp", choices=["none", "eo", "dp", "both"],
-                            help="whether to use fairness of not.")
-        parser.add_argument("--alpha", type=int, default=[a,a], help="fairness/accuracy trade-off parameter")
-        parser.add_argument("--which_position", type=int, default=5, choices=[5, 8],
-                            help="which position the sensitive attribute is in. 5: compas, 8: adult")
-        parser.add_argument("--save_file_name", type=str,
-                            default="/home/ancarey/FairFLHN/experiments/new/grid_search/results/dp-compas.txt")
+            args = parser.parse_args()
+            set_logger()
 
-        args = parser.parse_args()
-        set_logger()
 
-        device = "cuda:5"
+            device = "cuda:6"
 
-        args.classes_per_node = 2
+            args.classes_per_node = 2
 
-        train(
-            writer,
-            device=device,
-            data_name=args.data_name,
-            model_name=args.model_name,
-            classes_per_node=args.classes_per_node,
-            num_nodes=args.num_nodes,
-            steps=args.num_steps,
-            inner_steps=args.inner_steps,
-            lr=args.lr,
-            inner_lr=args.inner_lr,
-            wd=args.wd,
-            inner_wd=args.inner_wd,
-            hyper_hid=args.hyper_hid,
-            n_hidden=args.n_hidden,
-            bs=args.batch_size,
-            alpha=args.alpha,
-            fair=args.fair,
-            which_position=args.which_position,
-            save_file_name=args.save_file_name)
+            train(
+                writer,
+                device=device,
+                data_name=args.data_name,
+                model_name=args.model_name,
+                classes_per_node=args.classes_per_node,
+                num_nodes=args.num_nodes,
+                steps=args.num_steps,
+                inner_steps=args.inner_steps,
+                lr=args.lr,
+                inner_lr=args.inner_lr,
+                wd=args.wd,
+                inner_wd=args.inner_wd,
+                hyper_hid=args.hyper_hid,
+                n_hidden=args.n_hidden,
+                bs=args.batch_size,
+                alpha=args.alpha,
+                fair=args.fair,
+                which_position=args.which_position,
+                save_file_name=args.save_file_name)
 
 
 if __name__ == "__main__":
