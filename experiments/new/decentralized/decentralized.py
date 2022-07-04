@@ -110,9 +110,6 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
         nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node)
         num_features = len(nodes.features)
-        #embed_dim = num_features
-
-        embed_dim = int(1 + num_nodes / 4)
 
         # set fairness for all clients
         if fair == 'dp':
@@ -144,11 +141,10 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
             client_optimizers[i] = torch.optim.Adam(combo_parameters[i], lr=inner_lr, weight_decay=inner_wd)
 
         loss = torch.nn.BCELoss()
-        step_iter = trange(steps)
 
-        for step in step_iter:
-
-            node_id = random.choice(range(num_nodes))
+        for i in range(num_nodes):
+            print("Training Client: ", i)
+            node_id = i
 
             # get client models and optimizers
             model = models[node_id]
@@ -160,7 +156,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
             inner_optim = client_optimizers[node_id]
 
-            for j in range(inner_steps):
+            for j in range(62500):
                 model.train()
                 inner_optim.zero_grad()
 
@@ -194,7 +190,6 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
             all_aod[i].append(aod[i])
             all_eod[i].append(eod[i])
             all_spd[i].append(spd[i])
-        all_times.append(step_iter.format_dict["elapsed"])
 
 
     print(f"\n\nFinal Results | AVG Acc: {np.mean(avg_acc[0]):.4f}")
@@ -229,9 +224,9 @@ def main():
     parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results",
                         help="dir path for output file")
     parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"],
+    parser.add_argument("--fair", type=str, default="dp", choices=["none", "eo", "dp", "both"],
                         help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=[1,1], help="fairness/accuracy trade-off parameter")
+    parser.add_argument("--alpha", type=int, default=[.4,.1], help="fairness/accuracy trade-off parameter")
     parser.add_argument("--which_position", type=int, default=5, choices=[5, 8],
                         help="which position the sensitive attribute is in. 5: compas, 8: adult")
     args = parser.parse_args()
