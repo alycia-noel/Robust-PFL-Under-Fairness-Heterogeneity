@@ -196,14 +196,14 @@ def start_train_end_node_process_print_some(alphas, combo_params_dict, name_of_c
         # print(AOD, EOD, SPD)
 
 
-def get_averaged_weights(model_dict, sampled, name_of_models, number_of_samples):
+def get_averaged_weights(ratios, model_dict, sampled, name_of_models, number_of_samples):
     fc1_mean_weight = torch.zeros(size=model_dict[name_of_models[0]].fc1.weight.shape)
     fc1_mean_bias = torch.zeros(size=model_dict[name_of_models[0]].fc1.bias.shape)
 
     with torch.no_grad():
         for i, client in enumerate(sampled):
-            fc1_mean_weight += model_dict[name_of_models[client]].fc1.weight.data.clone()
-            fc1_mean_bias += model_dict[name_of_models[client]].fc1.bias.data.clone()
+            fc1_mean_weight += ratios[client]*(model_dict[name_of_models[client]].fc1.weight.data.clone())
+            fc1_mean_bias += ratios[client]*(model_dict[name_of_models[client]].fc1.bias.data.clone())
 
         fc1_mean_weight = fc1_mean_weight / number_of_samples
         fc1_mean_bias = fc1_mean_bias / number_of_samples
@@ -211,8 +211,8 @@ def get_averaged_weights(model_dict, sampled, name_of_models, number_of_samples)
     return fc1_mean_weight, fc1_mean_bias
 
 
-def set_averaged_weights_as_main_model_weights_and_update_main_model(main_model, model_dict, sampled, name_of_models, number_of_samples):
-    fc1_mean_weight, fc1_mean_bias = get_averaged_weights(model_dict, sampled, name_of_models, number_of_samples)
+def set_averaged_weights_as_main_model_weights_and_update_main_model(ratios, main_model, model_dict, sampled, name_of_models, number_of_samples):
+    fc1_mean_weight, fc1_mean_bias = get_averaged_weights(ratios, model_dict, sampled, name_of_models, number_of_samples)
 
     with torch.no_grad():
         main_model.fc1.weight.data = fc1_mean_weight.data.clone()
@@ -227,6 +227,16 @@ def train(device, data_name,model_name,classes_per_node,num_nodes,steps,lr,wd,bs
 
     num_features = len(nodes.features)
 
+    total_data_length = 0
+    client_data_length = []
+    ratios = []
+    for i in range(num_nodes):
+        total_data_length += len(nodes.train_loaders[i])
+        client_data_length.append(len(nodes.train_loaders[i]))
+
+    for i in range(num_nodes):
+        ratios.append(client_data_length[i]/total_data_length)
+
     main_model = LR(input_size=num_features, bound=.05, fairness='none')
 
     model_dict, optimizer_dict, criterion_dict, fair_loss_dict, combo_param_dict, constraint_dict = create_model_optimizer_criterion_dict(num_nodes, fair, alpha, model_name, lr, wd, num_features)
@@ -237,6 +247,7 @@ def train(device, data_name,model_name,classes_per_node,num_nodes,steps,lr,wd,bs
     name_of_fair_loss = list(fair_loss_dict.keys())
     name_of_combo_param = list(combo_param_dict.keys())
     name_of_constraint = list(constraint_dict.keys())
+
 
     print('~' * 22)
     print('~~~ Start Training ~~~')
@@ -249,7 +260,7 @@ def train(device, data_name,model_name,classes_per_node,num_nodes,steps,lr,wd,bs
     for step in step_iter:
         model_dict, sampled = send_main_model_to_nodes_and_update_model_dict('no',main_model, model_dict, num_nodes, num_client_sample_per_round, name_of_models)
         start_train_end_node_process_print_some(alpha, combo_param_dict, name_of_combo_param, device, sampled, constraint_dict, name_of_constraint, model_dict, name_of_models, criterion_dict, name_of_criterions, optimizer_dict, name_of_optimizers, fair_loss_dict, name_of_fair_loss, inner_steps, nodes, fair, which_position)
-        main_model = set_averaged_weights_as_main_model_weights_and_update_main_model(main_model, model_dict, sampled, name_of_models, num_client_sample_per_round)
+        main_model = set_averaged_weights_as_main_model_weights_and_update_main_model(ratios, main_model, model_dict, sampled, name_of_models, num_client_sample_per_round)
 
     model_dict, sampled = send_main_model_to_nodes_and_update_model_dict('yes',main_model, model_dict, num_nodes, num_nodes, name_of_models)
     curr_results, avg_acc, all_acc, f1, aod, eod, spd = eval_model(nodes, num_nodes, model_dict, name_of_models, device, which_position)
