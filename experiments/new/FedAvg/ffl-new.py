@@ -11,8 +11,8 @@ import pandas as pd
 import torch.utils.data
 from tqdm import trange
 from models import LR, Constraint
-from experiments.new.pFedHN.node import BaseNodes
-from experiments.new.pFedHN.utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
+from node import BaseNodes
+from utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
 from torch.utils.tensorboard import SummaryWriter
 warnings.filterwarnings("ignore")
 
@@ -90,7 +90,7 @@ def evaluate(nodes, num_nodes, hnet, models, cnets, num_features, loss, device, 
 
     return results, preds, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd
 
-def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,inner_steps,lr,inner_lr,wd,inner_wd, hyper_hid,n_hidden,bs, alpha,fair, which_position):
+def train(save_file_name, device, data_name,model_name,classes_per_node,num_nodes,steps,inner_steps,lr,inner_lr,wd,inner_wd, hyper_hid,n_hidden,bs, alpha,fair, which_position):
 
     avg_acc = [[] for i in range(num_nodes + 1)]
     all_f1 = [[] for i in range(num_nodes)]
@@ -160,7 +160,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
             for j in range(2):
                 node_id = random.choice(range(num_nodes))
                 while node_id == previous:
-                    node_id = random.choice(range(num_nodes))
+                   node_id = random.choice(range(num_nodes))
                 previous = node_id
 
                 # get client models and optimizers
@@ -231,6 +231,10 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
             all_spd[i].append(spd[i])
         all_times.append(step_iter.format_dict["elapsed"])
 
+    file = open(save_file_name, "a")
+    file.write(
+        "\n AVG Acc: {0:.4f}, C1 ACC: {1:.4f}, C2 ACC: {2:.4f}, C3 ACC: {3:.4f}, C4 ACC: {4:.4f}, C1 F1: {5:.4f}, C2 F1: {6:.4f}, C3 F1: {7:.4f}, C4 F1: {8:.4f}, C1 AOD: {9:.4f}, C2 AOD: {10: .4f}, C3 AOD: {11:.4f}, C4 AOD: {12:.4f}, C1 EOD: {13: .4f}, C2 EOD: {14:.4f}, C3 EOD: {15:.4f}, C4 EOD: {16:.4f}, C1 SPD: {17:.4f}, C2 SPD: {18:.4f}, C3 SPD: {19:.4f}, C4 SPD: {20:.4f}, Time: {21:.2f}".format(np.mean(avg_acc[0]),np.mean(avg_acc[1]), np.mean(avg_acc[2]), np.mean(avg_acc[3]), np.mean(avg_acc[4]), np.mean(all_f1[0]), np.mean(all_f1[1]), np.mean(all_f1[2]), np.mean(all_f1[3]), np.mean(all_aod[0]), np.mean(all_aod[1]), np.mean(all_aod[2]), np.mean(all_aod[3]), np.mean(all_eod[0]), np.mean(all_eod[1]), np.mean(all_eod[2]), np.mean(all_eod[3]), np.mean(all_spd[0]), np.mean(all_spd[1]), np.mean(all_spd[2]), np.mean(all_spd[3]), step_iter.format_dict['elapsed']))
+    file.close()
 
     print(f"\n\nFinal Results | AVG Acc: {np.mean(avg_acc[0]):.4f}")
 
@@ -240,62 +244,88 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
 
 def main():
-    pd.set_option('display.float_format', lambda x: '%.1f' % x)
+    file = open("/home/ancarey/FairFLHN/experiments/new/FedAvg/all-runs.txt", "w")
+    file.close()
 
-    writer = SummaryWriter('results')
+    names = ['adult', 'compas']
+    fair = ['none', 'dp', 'eo', 'both']
 
-    parser = argparse.ArgumentParser(description="Fair Hypernetworks")
+    for i, n in enumerate(names):
+        for j, f in enumerate(fair):
+            if n == 'adult':
+                important = 8
+                clr = 5e-5
+                hlr = 1e-5
+                bs = 256
+                a1 = 100
+                a2 = 100
+            elif n == 'compas':
+                important = 5
+                clr = .05
+                hlr = 5e-5
+                bs = 64
+                a1 = 60
+                a2 = 40
 
-    parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
-    parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
-    parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
-    parser.add_argument("--num_steps", type=int, default=5000)
-    parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
-    parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
-    parser.add_argument("--inner_lr", type=float, default=.05, help="learning rate for inner optimizer")
-    parser.add_argument("--lr", type=float, default=5e-5, help="learning rate")
-    parser.add_argument("--wd", type=float, default=1e-10, help="weight decay")
-    parser.add_argument("--inner_wd", type=float, default=1e-10, help="inner weight decay")
-    parser.add_argument("--embed_dim", type=int, default=10, help="embedding dim")
-    parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
-    parser.add_argument("--gpu", type=int, default=5, help="gpu device ID")
-    parser.add_argument("--eval_every", type=int, default=50, help="eval every X selected epochs")
-    parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results",
-                        help="dir path for output file")
-    parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"],
-                        help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=[60,40], help="fairness/accuracy trade-off parameter")
-    parser.add_argument("--which_position", type=int, default=5, choices=[5, 8],
-                        help="which position the sensitive attribute is in. 5: compas, 8: adult")
-    args = parser.parse_args()
-    assert args.gpu <= torch.cuda.device_count()
-    set_logger()
+            pd.set_option('display.float_format', lambda x: '%.1f' % x)
 
-    device = "cuda:1"
+            writer = SummaryWriter('results')
 
-    args.classes_per_node = 2
+            parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-    train(
-        writer,
-        device=device,
-        data_name=args.data_name,
-        model_name=args.model_name,
-        classes_per_node=args.classes_per_node,
-        num_nodes=args.num_nodes,
-        steps=args.num_steps,
-        inner_steps=args.inner_steps,
-        lr=args.lr,
-        inner_lr=args.inner_lr,
-        wd=args.wd,
-        inner_wd=args.inner_wd,
-        hyper_hid=args.hyper_hid,
-        n_hidden=args.n_hidden,
-        bs=args.batch_size,
-        alpha=args.alpha,
-        fair=args.fair,
-        which_position=args.which_position)
+            parser.add_argument("--data_name", type=str, default=n, choices=["adult", "compas"], help="choice of dataset")
+            parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
+            parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
+            parser.add_argument("--num_steps", type=int, default=5000)
+            parser.add_argument("--batch_size", type=int, default=bs)
+            parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
+            parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
+            parser.add_argument("--inner_lr", type=float, default=clr, help="learning rate for inner optimizer")
+            parser.add_argument("--lr", type=float, default=hlr, help="learning rate")
+            parser.add_argument("--wd", type=float, default=1e-10, help="weight decay")
+            parser.add_argument("--inner_wd", type=float, default=1e-10, help="inner weight decay")
+            parser.add_argument("--embed_dim", type=int, default=10, help="embedding dim")
+            parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
+            parser.add_argument("--gpu", type=int, default=5, help="gpu device ID")
+            parser.add_argument("--eval_every", type=int, default=50, help="eval every X selected epochs")
+            parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results",
+                                help="dir path for output file")
+            parser.add_argument("--seed", type=int, default=0, help="seed value")
+            parser.add_argument("--fair", type=str, default=f, choices=["none", "eo", "dp", "both"],
+                                help="whether to use fairness of not.")
+            parser.add_argument("--alpha", type=int, default=[a1,a2], help="fairness/accuracy trade-off parameter")
+            parser.add_argument("--which_position", type=int, default=important, choices=[5, 8],
+                                help="which position the sensitive attribute is in. 5: compas, 8: adult")
+            parser.add_argument("--save_file_name", type=str,
+                                default="/home/ancarey/FairFLHN/experiments/new/FedAvg/all-runs.txt")
+
+            args = parser.parse_args()
+            assert args.gpu <= torch.cuda.device_count()
+            set_logger()
+
+            device = "cuda:4"
+
+            args.classes_per_node = 2
+
+            train(
+                save_file_name=args.save_file_name,
+                device=device,
+                data_name=args.data_name,
+                model_name=args.model_name,
+                classes_per_node=args.classes_per_node,
+                num_nodes=args.num_nodes,
+                steps=args.num_steps,
+                inner_steps=args.inner_steps,
+                lr=args.lr,
+                inner_lr=args.inner_lr,
+                wd=args.wd,
+                inner_wd=args.inner_wd,
+                hyper_hid=args.hyper_hid,
+                n_hidden=args.n_hidden,
+                bs=args.batch_size,
+                alpha=args.alpha,
+                fair=args.fair,
+                which_position=args.which_position)
 
 
 if __name__ == "__main__":
