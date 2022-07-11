@@ -4,6 +4,7 @@ import argparse
 import logging
 import random
 import warnings
+import copy
 from collections import OrderedDict, defaultdict
 import numpy as np
 import torch
@@ -157,14 +158,19 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
         step_iter = trange(steps)
 
         for step in step_iter:
-            previous = -1
+
             client_weights = []
             client_biases = []
-            for j in range(1):
-                node_id = random.choice(range(num_nodes))
-                while node_id == previous:
-                   node_id = random.choice(range(num_nodes))
-                previous = node_id
+            sampled = []
+            choices = [0, 1, 2, 3]
+
+            sample_precentage = random.choice(range(num_nodes))
+
+            for j in range(sample_precentage):
+
+                node_id = random.choice(choices)
+                sampled.append(node_id)
+                choices.remove(node_id)
 
                 # get client models and optimizers
                 model = models[node_id]
@@ -177,8 +183,7 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
 
                 inner_optim = client_optimizers[node_id]
 
-                model.fc1.weight.data = global_model.fc1.weight.data.clone()
-                model.fc1.weight.bias = global_model.fc1.bias.data.clone()
+                model = copy.deepcopy(global_model)
 
                 for j in range(inner_steps):
                     model.train()
@@ -210,12 +215,15 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
             new_weights = torch.zeros(size=global_model.fc1.weight.shape)
             new_biases = torch.zeros(size=global_model.fc1.bias.shape)
 
-            for i in range(1):
-                new_weights += ((client_data_length[i] / total_data_length) * client_weights[i].cpu())
-                new_biases += ((client_data_length[i] / total_data_length) * client_biases[i].cpu())
+            total_sampled_length = 0
+            for i, c in enumerate(sampled):
+                total_sampled_length += client_data_length[c]
+            for i, c in enumerate(sampled):
+                new_weights += ((client_data_length[c] / total_sampled_length) * client_weights[i].cpu())
+                new_biases += ((client_data_length[c] / total_sampled_length) * client_biases[i].cpu())
 
-            new_weights = (new_weights / 2).to(device)
-            new_biases = (new_biases / 2).to(device)
+            new_weights = (new_weights).to(device)
+            new_biases = (new_biases).to(device)
 
             global_model.fc1.weight.data = new_weights.data.clone()
             global_model.fc1.bias.data = new_biases.data.clone()
@@ -251,7 +259,7 @@ def main():
     file.close()
 
     names = ['adult']#, 'compas']
-    fair = ['both']#none', 'dp', 'eo', 'both']
+    fair = ['none']#none', 'dp', 'eo', 'both']
 
     for i, n in enumerate(names):
         for j, f in enumerate(fair):
