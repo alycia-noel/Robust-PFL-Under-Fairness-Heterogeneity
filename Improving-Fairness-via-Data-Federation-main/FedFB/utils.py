@@ -6,7 +6,7 @@ from scipy.stats import multivariate_normal
 import torch, random, copy, os
 
 ################## MODEL SETTING ########################
-DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+DEVICE = 'cuda:5'
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
 #########################################################
 
@@ -57,26 +57,6 @@ class logReg(torch.nn.Module):
         logits = self.linear(x.float())
         probas = torch.sigmoid(logits)
         return probas.type(torch.FloatTensor), logits
-
-class mlp(torch.nn.Module):
-    """
-    Logistic regression model.
-    """
-    def __init__(self, num_features, num_classes, seed = 123):
-        torch.manual_seed(seed)
-
-        super().__init__()
-        self.num_classes = num_classes
-        self.linear1 = torch.nn.Linear(num_features, 4)
-        self.linear2 = torch.nn.Linear(4, num_classes)
-        self.relu = torch.nn.ReLU()
-
-    def forward(self, x):
-        out = self.linear1(x.float())
-        out = self.relu(out)
-        out = self.linear2(out)
-        probas = torch.sigmoid(out)
-        return probas.type(torch.FloatTensor), out
 
 def logit_compute(probas):
     return torch.log(probas/(1-probas))
@@ -193,7 +173,6 @@ def loss_func(option, logits, targets, outputs, sensitive, larg = 1):
     """
     Loss function. 
     """
-
     acc_loss = F.cross_entropy(logits, targets, reduction = 'sum')
     fair_loss0 = torch.mul(sensitive - sensitive.type(torch.FloatTensor).mean(), logits.T[0] - torch.mean(logits.T[0]))
     fair_loss0 = torch.mean(torch.mul(fair_loss0, fair_loss0)) 
@@ -204,7 +183,6 @@ def loss_func(option, logits, targets, outputs, sensitive, larg = 1):
     if option == 'local zafar':
         return acc_loss + larg*fair_loss, acc_loss, larg*fair_loss
     elif option == 'FB_inference':
-        # acc_loss = torch.sum(torch.nn.BCELoss(reduction = 'none')((outputs.T[1]+1)/2, torch.ones(logits.shape[0])))
         acc_loss = F.cross_entropy(logits, torch.ones(logits.shape[0]).type(torch.LongTensor).to(DEVICE), reduction = 'sum')
         return acc_loss, acc_loss, fair_loss
     else:
@@ -241,9 +219,9 @@ def weighted_loss(logits, targets, weights, mean = True):
     acc_loss = F.cross_entropy(logits, targets, reduction = 'none')
     if mean:
         weights_sum = weights.sum().item()
-        acc_loss = torch.sum(acc_loss * weights / weights_sum)
+        acc_loss = torch.sum(acc_loss * weights.to(DEVICE) / weights_sum)
     else:
-        acc_loss = torch.sum(acc_loss * weights)
+        acc_loss = torch.sum(acc_loss * weights.to(DEVICE))
     return acc_loss
     
 def al_loss(logits, targets, adv_logits, adv_targets):
@@ -369,7 +347,7 @@ def process_csv(dir_name, filename, label_name, favorable_class, sensitive_attri
     only support binary sensitive attributes -> [gender, race] -> 4 sensitive groups 
     """
 
-    df = pd.read_csv(os.path.join('FedFB', dir_name, filename), delimiter = ',', header = header, na_values = na_values)
+    df = pd.read_csv(os.path.join('/home/ancarey/FairFLHN/Improving-Fairness-via-Data-Federation-main/FedFB', dir_name, filename), delimiter = ',', header = header, na_values = na_values)
     if header == None: df.columns = columns
     df = df[features_to_keep]
 

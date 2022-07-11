@@ -4,6 +4,7 @@ import argparse
 import logging
 import random
 import warnings
+import copy
 from collections import OrderedDict, defaultdict
 import numpy as np
 import torch
@@ -29,7 +30,7 @@ def eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, 
     return curr_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd
 
 @torch.no_grad()
-def evaluate(nodes, num_nodes, hnet, models, cnets, num_features, loss, device, fair, constraints, alpha, which_position):
+def evaluate(nodes, num_nodes, global_model, models, cnets, num_features, loss, device, fair, constraints, alpha, which_position):
     results = defaultdict(lambda: defaultdict(list))
     preds = []
     true = []
@@ -41,6 +42,9 @@ def evaluate(nodes, num_nodes, hnet, models, cnets, num_features, loss, device, 
         queries_client = []
         model = models[node_id]
         constraint = constraints[node_id]
+
+        model.fc1.weight.data = global_model.fc1.weight.data.clone()
+        model.fc1.weight.bias = global_model.fc1.bias.data.clone()
 
         model.to(device)
         constraint.to(device)
@@ -154,14 +158,19 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
         step_iter = trange(steps)
 
         for step in step_iter:
-            previous = -1
+
             client_weights = []
             client_biases = []
-            for j in range(2):
-                node_id = random.choice(range(num_nodes))
-                while node_id == previous:
-                   node_id = random.choice(range(num_nodes))
-                previous = node_id
+            sampled = []
+            choices = [0, 1, 2, 3]
+
+            sample_precentage = random.choice(range(num_nodes))
+
+            for j in range(sample_precentage):
+
+                node_id = random.choice(choices)
+                sampled.append(node_id)
+                choices.remove(node_id)
 
                 # get client models and optimizers
                 model = models[node_id]
@@ -174,8 +183,7 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
 
                 inner_optim = client_optimizers[node_id]
 
-                model.fc1.weight.data = global_model.fc1.weight.data.clone()
-                model.fc1.weight.bias = global_model.fc1.bias.data.clone()
+                model = copy.deepcopy(global_model)
 
                 for j in range(inner_steps):
                     model.train()
@@ -207,18 +215,21 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
             new_weights = torch.zeros(size=global_model.fc1.weight.shape)
             new_biases = torch.zeros(size=global_model.fc1.bias.shape)
 
-            for i in range(2):
-                new_weights += ((client_data_length[i] / total_data_length) * client_weights[i].cpu())
-                new_biases += ((client_data_length[i] / total_data_length) * client_biases[i].cpu())
+            total_sampled_length = 0
+            for i, c in enumerate(sampled):
+                total_sampled_length += client_data_length[c]
+            for i, c in enumerate(sampled):
+                new_weights += ((client_data_length[c] / total_sampled_length) * client_weights[i].cpu())
+                new_biases += ((client_data_length[c] / total_sampled_length) * client_biases[i].cpu())
 
-            new_weights = (new_weights / 2).to(device)
-            new_biases = (new_biases / 2).to(device)
+            new_weights = (new_weights).to(device)
+            new_biases = (new_biases).to(device)
 
             global_model.fc1.weight.data = new_weights.data.clone()
             global_model.fc1.bias.data = new_biases.data.clone()
 
         step_results, avg_loss, avg_acc_all, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(
-            nodes, num_nodes, None, models, None, num_features, loss, device, confusion=False, fair=fair,
+            nodes, num_nodes, global_model, models, None, num_features, loss, device, confusion=False, fair=fair,
             constraint=constraints, alpha=alpha, which_position=which_position)
 
         logging.info(f"\n\nFinal Results | AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc_all:.4f}")
@@ -231,10 +242,10 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
             all_spd[i].append(spd[i])
         all_times.append(step_iter.format_dict["elapsed"])
 
-    file = open(save_file_name, "a")
-    file.write(
-        "\n AVG Acc: {0:.4f}, C1 ACC: {1:.4f}, C2 ACC: {2:.4f}, C3 ACC: {3:.4f}, C4 ACC: {4:.4f}, C1 F1: {5:.4f}, C2 F1: {6:.4f}, C3 F1: {7:.4f}, C4 F1: {8:.4f}, C1 AOD: {9:.4f}, C2 AOD: {10: .4f}, C3 AOD: {11:.4f}, C4 AOD: {12:.4f}, C1 EOD: {13: .4f}, C2 EOD: {14:.4f}, C3 EOD: {15:.4f}, C4 EOD: {16:.4f}, C1 SPD: {17:.4f}, C2 SPD: {18:.4f}, C3 SPD: {19:.4f}, C4 SPD: {20:.4f}, Time: {21:.2f}".format(np.mean(avg_acc[0]),np.mean(avg_acc[1]), np.mean(avg_acc[2]), np.mean(avg_acc[3]), np.mean(avg_acc[4]), np.mean(all_f1[0]), np.mean(all_f1[1]), np.mean(all_f1[2]), np.mean(all_f1[3]), np.mean(all_aod[0]), np.mean(all_aod[1]), np.mean(all_aod[2]), np.mean(all_aod[3]), np.mean(all_eod[0]), np.mean(all_eod[1]), np.mean(all_eod[2]), np.mean(all_eod[3]), np.mean(all_spd[0]), np.mean(all_spd[1]), np.mean(all_spd[2]), np.mean(all_spd[3]), step_iter.format_dict['elapsed']))
-    file.close()
+    # file = open(save_file_name, "a")
+    # file.write(
+    #     "\n AVG Acc: {0:.4f}, C1 ACC: {1:.4f}, C2 ACC: {2:.4f}, C3 ACC: {3:.4f}, C4 ACC: {4:.4f}, C1 F1: {5:.4f}, C2 F1: {6:.4f}, C3 F1: {7:.4f}, C4 F1: {8:.4f}, C1 AOD: {9:.4f}, C2 AOD: {10: .4f}, C3 AOD: {11:.4f}, C4 AOD: {12:.4f}, C1 EOD: {13: .4f}, C2 EOD: {14:.4f}, C3 EOD: {15:.4f}, C4 EOD: {16:.4f}, C1 SPD: {17:.4f}, C2 SPD: {18:.4f}, C3 SPD: {19:.4f}, C4 SPD: {20:.4f}, Time: {21:.2f}".format(np.mean(avg_acc[0]),np.mean(avg_acc[1]), np.mean(avg_acc[2]), np.mean(avg_acc[3]), np.mean(avg_acc[4]), np.mean(all_f1[0]), np.mean(all_f1[1]), np.mean(all_f1[2]), np.mean(all_f1[3]), np.mean(all_aod[0]), np.mean(all_aod[1]), np.mean(all_aod[2]), np.mean(all_aod[3]), np.mean(all_eod[0]), np.mean(all_eod[1]), np.mean(all_eod[2]), np.mean(all_eod[3]), np.mean(all_spd[0]), np.mean(all_spd[1]), np.mean(all_spd[2]), np.mean(all_spd[3]), step_iter.format_dict['elapsed']))
+    # file.close()
 
     print(f"\n\nFinal Results | AVG Acc: {np.mean(avg_acc[0]):.4f}")
 
@@ -247,8 +258,8 @@ def main():
     file = open("/home/ancarey/FairFLHN/experiments/new/FedAvg/all-runs.txt", "w")
     file.close()
 
-    names = ['adult', 'compas']
-    fair = ['none', 'dp', 'eo', 'both']
+    names = ['adult']#, 'compas']
+    fair = ['none']#none', 'dp', 'eo', 'both']
 
     for i, n in enumerate(names):
         for j, f in enumerate(fair):
