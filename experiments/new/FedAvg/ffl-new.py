@@ -8,6 +8,7 @@ import copy
 from collections import OrderedDict, defaultdict
 import numpy as np
 import torch
+import copy
 import pandas as pd
 import torch.utils.data
 from tqdm import trange
@@ -43,8 +44,7 @@ def evaluate(nodes, num_nodes, global_model, models, cnets, num_features, loss, 
         model = models[node_id]
         constraint = constraints[node_id]
 
-        model.fc1.weight.data = global_model.fc1.weight.data.clone()
-        model.fc1.weight.bias = global_model.fc1.bias.data.clone()
+        #model = copy.deepcopy(global_model)
 
         model.to(device)
         constraint.to(device)
@@ -164,10 +164,8 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
             sampled = []
             choices = [0, 1, 2, 3]
 
-            sample_precentage = random.choice(range(num_nodes))
-
+            sample_precentage = random.choice([1,2,3,4])
             for j in range(sample_precentage):
-
                 node_id = random.choice(choices)
                 sampled.append(node_id)
                 choices.remove(node_id)
@@ -178,12 +176,13 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
                 combo_params = combo_parameters[node_id]
                 alpha=alphas[node_id]
 
+                sd = global_model.state_dict()
+                model.load_state_dict(sd)
+
                 model.to(device)
                 constraint.to(device)
 
                 inner_optim = client_optimizers[node_id]
-
-                model = copy.deepcopy(global_model)
 
                 for j in range(inner_steps):
                     model.train()
@@ -246,7 +245,7 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
     # file.write(
     #     "\n AVG Acc: {0:.4f}, C1 ACC: {1:.4f}, C2 ACC: {2:.4f}, C3 ACC: {3:.4f}, C4 ACC: {4:.4f}, C1 F1: {5:.4f}, C2 F1: {6:.4f}, C3 F1: {7:.4f}, C4 F1: {8:.4f}, C1 AOD: {9:.4f}, C2 AOD: {10: .4f}, C3 AOD: {11:.4f}, C4 AOD: {12:.4f}, C1 EOD: {13: .4f}, C2 EOD: {14:.4f}, C3 EOD: {15:.4f}, C4 EOD: {16:.4f}, C1 SPD: {17:.4f}, C2 SPD: {18:.4f}, C3 SPD: {19:.4f}, C4 SPD: {20:.4f}, Time: {21:.2f}".format(np.mean(avg_acc[0]),np.mean(avg_acc[1]), np.mean(avg_acc[2]), np.mean(avg_acc[3]), np.mean(avg_acc[4]), np.mean(all_f1[0]), np.mean(all_f1[1]), np.mean(all_f1[2]), np.mean(all_f1[3]), np.mean(all_aod[0]), np.mean(all_aod[1]), np.mean(all_aod[2]), np.mean(all_aod[3]), np.mean(all_eod[0]), np.mean(all_eod[1]), np.mean(all_eod[2]), np.mean(all_eod[3]), np.mean(all_spd[0]), np.mean(all_spd[1]), np.mean(all_spd[2]), np.mean(all_spd[3]), step_iter.format_dict['elapsed']))
     # file.close()
-
+    print(all_aod, all_eod, all_spd)
     print(f"\n\nFinal Results | AVG Acc: {np.mean(avg_acc[0]):.4f}")
 
     for i in range(num_nodes):
@@ -259,7 +258,7 @@ def main():
     file.close()
 
     names = ['adult']#, 'compas']
-    fair = ['none']#none', 'dp', 'eo', 'both']
+    fair = ['both']#none', 'dp', 'eo', 'both']
 
     for i, n in enumerate(names):
         for j, f in enumerate(fair):

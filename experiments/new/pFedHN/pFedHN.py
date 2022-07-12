@@ -156,23 +156,25 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
         loss = torch.nn.BCELoss()
         step_iter = trange(steps)
 
+        nodes = [0, 1, 2, 3]
+
         for step in step_iter:
             hnet.train()
-            node_id = random.choice(range(num_nodes))
+            node_id = random.choice(nodes)
 
             # get client models and optimizers
             model = models[node_id]
             constraint = constraints[node_id]
             combo_params = combo_parameters[node_id]
             alpha=alphas[node_id]
-            model.to(device)
+
             constraint.to(device)
 
             inner_optim = client_optimizers[node_id]
 
-
             weights = hnet(torch.tensor([node_id], dtype=torch.long).to(device))
             model.load_state_dict(weights)
+            model.to(device)
 
             inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
             # test
@@ -209,7 +211,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
             for p, g in zip(hnet.parameters(), hnet_grads):
                 p.grad = g
 
-            #torch.nn.utils.clip_grad_norm_(hnet.parameters(), 50)
+            torch.nn.utils.clip_grad_norm_(hnet.parameters(), 50)
             optimizer.step()
 
         step_results, avg_loss, avg_acc_all, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(
