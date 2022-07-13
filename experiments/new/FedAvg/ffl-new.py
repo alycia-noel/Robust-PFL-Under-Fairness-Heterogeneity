@@ -274,7 +274,7 @@ def main():
                 clr = .05
                 hlr = 5e-5
                 bs = 64
-                a1 = 60
+                a1 = 25
                 a2 = 40
 
             pd.set_option('display.float_format', lambda x: '%.1f' % x)
@@ -303,7 +303,7 @@ def main():
             parser.add_argument("--seed", type=int, default=0, help="seed value")
             parser.add_argument("--fair", type=str, default=f, choices=["none", "eo", "dp", "both"],
                                 help="whether to use fairness of not.")
-            parser.add_argument("--alpha", type=int, default=[2,a2], help="fairness/accuracy trade-off parameter")
+            parser.add_argument("--alpha", type=int, default=[a1,a2], help="fairness/accuracy trade-off parameter")
             parser.add_argument("--which_position", type=int, default=important, choices=[5, 8],
                                 help="which position the sensitive attribute is in. 5: compas, 8: adult")
             parser.add_argument("--save_file_name", type=str,
