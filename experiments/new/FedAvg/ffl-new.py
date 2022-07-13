@@ -247,7 +247,7 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
     # file.close()
     print(all_aod, all_eod, all_spd)
     print(f"\n\nFinal Results | AVG Acc: {np.mean(avg_acc[0]):.4f}")
-
+    print(all_aod, all_eod, all_spd)
     for i in range(num_nodes):
         print("\nClient", i+1)
         print(f"Acc: {np.mean(avg_acc[i+1]):.4f}, F1: {np.mean(all_f1[i]):.4f}, AOD: {np.mean(all_aod[i]):.4f}, EOD: {np.mean(all_eod[i]):.4f}, SPD: {np.mean(all_spd[i]):.4f}")
@@ -257,8 +257,8 @@ def main():
     file = open("/home/ancarey/FairFLHN/experiments/new/FedAvg/all-runs.txt", "w")
     file.close()
 
-    names = ['adult']#, 'compas']
-    fair = ['both']#none', 'dp', 'eo', 'both']
+    names = ['compas']#, 'compas']
+    fair = ['dp', 'eo', 'both']
 
     for i, n in enumerate(names):
         for j, f in enumerate(fair):
@@ -303,7 +303,7 @@ def main():
             parser.add_argument("--seed", type=int, default=0, help="seed value")
             parser.add_argument("--fair", type=str, default=f, choices=["none", "eo", "dp", "both"],
                                 help="whether to use fairness of not.")
-            parser.add_argument("--alpha", type=int, default=[a1,a2], help="fairness/accuracy trade-off parameter")
+            parser.add_argument("--alpha", type=int, default=[2,a2], help="fairness/accuracy trade-off parameter")
             parser.add_argument("--which_position", type=int, default=important, choices=[5, 8],
                                 help="which position the sensitive attribute is in. 5: compas, 8: adult")
             parser.add_argument("--save_file_name", type=str,
