@@ -245,9 +245,9 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
     # file.write(
     #     "\n AVG Acc: {0:.4f}, C1 ACC: {1:.4f}, C2 ACC: {2:.4f}, C3 ACC: {3:.4f}, C4 ACC: {4:.4f}, C1 F1: {5:.4f}, C2 F1: {6:.4f}, C3 F1: {7:.4f}, C4 F1: {8:.4f}, C1 AOD: {9:.4f}, C2 AOD: {10: .4f}, C3 AOD: {11:.4f}, C4 AOD: {12:.4f}, C1 EOD: {13: .4f}, C2 EOD: {14:.4f}, C3 EOD: {15:.4f}, C4 EOD: {16:.4f}, C1 SPD: {17:.4f}, C2 SPD: {18:.4f}, C3 SPD: {19:.4f}, C4 SPD: {20:.4f}, Time: {21:.2f}".format(np.mean(avg_acc[0]),np.mean(avg_acc[1]), np.mean(avg_acc[2]), np.mean(avg_acc[3]), np.mean(avg_acc[4]), np.mean(all_f1[0]), np.mean(all_f1[1]), np.mean(all_f1[2]), np.mean(all_f1[3]), np.mean(all_aod[0]), np.mean(all_aod[1]), np.mean(all_aod[2]), np.mean(all_aod[3]), np.mean(all_eod[0]), np.mean(all_eod[1]), np.mean(all_eod[2]), np.mean(all_eod[3]), np.mean(all_spd[0]), np.mean(all_spd[1]), np.mean(all_spd[2]), np.mean(all_spd[3]), step_iter.format_dict['elapsed']))
     # file.close()
-    print(all_aod, all_eod, all_spd)
+
     print(f"\n\nFinal Results | AVG Acc: {np.mean(avg_acc[0]):.4f}")
-    print(all_aod, all_eod, all_spd)
+    #print(all_aod, all_eod, all_spd)
     for i in range(num_nodes):
         print("\nClient", i+1)
         print(f"Acc: {np.mean(avg_acc[i+1]):.4f}, F1: {np.mean(all_f1[i]):.4f}, AOD: {np.mean(all_aod[i]):.4f}, EOD: {np.mean(all_eod[i]):.4f}, SPD: {np.mean(all_spd[i]):.4f}")
@@ -274,7 +274,7 @@ def main():
                 clr = .05
                 hlr = 5e-5
                 bs = 64
-                a1 = 25
+                a1 = 60
                 a2 = 40
 
             pd.set_option('display.float_format', lambda x: '%.1f' % x)
