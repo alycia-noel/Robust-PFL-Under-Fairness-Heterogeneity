@@ -114,9 +114,9 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
         nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node)
         num_features = len(nodes.features)
-        #embed_dim = num_features
+        embed_dim = num_features
 
-        embed_dim = int(1 + num_nodes / 4)
+        #embed_dim = int(1 + num_nodes / 4)
 
         # set fairness for all clients
         if fair == 'dp':
@@ -237,7 +237,7 @@ def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,
 
 def main():
 
-    d = [.25, .5, .75, 1,2,3,4,5,6,7,8,9]
+    d = [1,10,20,30,40,50,60,70,80,90,100]
 
     for i, delta in enumerate(d):
         pd.set_option('display.float_format', lambda x: '%.1f' % x)
@@ -249,10 +249,10 @@ def main():
         parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
         parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
         parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
-        parser.add_argument("--num_steps", type=int, default=5000)
+        parser.add_argument("--num_steps", type=int, default=2500)
         parser.add_argument("--batch_size", type=int, default=64)
         parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
-        parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
+        parser.add_argument("--n_hidden", type=int, default=4, help="num. hidden layers")
         parser.add_argument("--inner_lr", type=float, default=.05, help="learning rate for inner optimizer")
         parser.add_argument("--lr", type=float, default=5e-5, help="learning rate")
         parser.add_argument("--wd", type=float, default=1e-10, help="weight decay")
