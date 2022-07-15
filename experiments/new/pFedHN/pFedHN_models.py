@@ -45,7 +45,7 @@ class LR(nn.Module):
 
         self.num_classes = 2
         self.fairness = fairness
-        self.bound = torch.Tensor([bound])
+        self.bound = bound
         self.sensitive_classes = [0, 1]
         self.input_size = input_size
         self.fc1 = nn.Linear(self.input_size, 1)
@@ -55,6 +55,7 @@ class LR(nn.Module):
             self.n_constraints = 2 * self.num_classes
             self.dim_condition = self.num_classes + 1
             self.M = torch.zeros((self.n_constraints, self.dim_condition))
+            self.c = torch.tensor([.5 for x in range(self.n_constraints)])
 
             for i in range(self.n_constraints):
                 j = i % 2
@@ -70,7 +71,7 @@ class LR(nn.Module):
             self.dim_condition = self.num_classes * (self.num_classes + 1)
             self.M = torch.zeros((self.n_constraints, self.dim_condition))
 
-            self.c = torch.zeros(self.n_constraints)
+            self.c = torch.tensor([self.bound for x in range(self.n_constraints)])
             element_k_a = self.sensitive_classes + [None]
 
             for i_a, a_0 in enumerate(self.sensitive_classes):
@@ -124,7 +125,7 @@ class LR(nn.Module):
         return torch.stack(expected_values_list)
 
     def M_mu_q(self, pred, sensitive, y):
-        return torch.mv(self.M.to(pred.device), self.mu_f(pred, sensitive, y) - self.bound.to(pred.device))
+        return torch.mv(self.M.to(pred.device), self.mu_f(pred, sensitive, y)) - self.c.to(pred.device)
 
     def forward(self, x, s, y):
         prediction = torch.sigmoid(self.fc1(x))
@@ -137,9 +138,9 @@ class LR(nn.Module):
         return prediction, m_mu_q
 
 class Constraint(torch.nn.Module):
-    def __init__(self, fair):
+    def __init__(self, fair, bound):
         super().__init__()
-
+        self.bound = bound
         self.fair = fair
         if self.fair == 'dp':
             self.register_parameter(name='lmbda', param=torch.nn.Parameter(torch.rand((4,1))))
@@ -147,13 +148,13 @@ class Constraint(torch.nn.Module):
             self.register_parameter(name='lmbda', param=torch.nn.Parameter(torch.rand((8,1))))
 
     def forward(self, value):
-        with torch.no_grad():
-            self.lmbda.data = self.lmbda.data.clamp(min=0, max=(np.linalg.norm(self.lmbda.data.cpu().numpy()) + (1/.05)))
-
-        for i, lm in enumerate(self.lmbda.data):
-            if lm.item() < 0:
-                print('hit', lm.item())
-                exit(1)
+        # with torch.no_grad():
+        #     self.lmbda.data = self.lmbda.data.clamp(min=0, max=((1/self.bound) - np.linalg.norm(self.lmbda.data.cpu().numpy())))
+        #
+        # for i, lm in enumerate(self.lmbda.data):
+        #     if lm.item() < 0:
+        #         print('hit', lm.item())
+        #         exit(1)
 
         loss = torch.matmul(self.lmbda.T, value)
 
