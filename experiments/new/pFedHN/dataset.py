@@ -7,8 +7,6 @@ import pandas as pd
 from collections import OrderedDict
 from sklearn.model_selection import train_test_split
 import numpy as np
-from collections import defaultdict
-from torch.utils.data.sampler import SubsetRandomSampler
 
 class TabularData(Dataset):
     def __init__(self, X, y):
@@ -81,12 +79,10 @@ def clean_and_encode_dataset(data, data_name):
         data = data.loc[data['is_recid'] != -1]
         data = data.loc[data['c_charge_degree'] != "O"]
         data = data.loc[data['score_text'] != 'N/A']
-        #data['race'].loc[data['race'] != "Caucasian"] = 'Other'
         data['is_med_or_high_risk'] = (data['decile_score'] >= 5).astype(int)
         data['length_of_stay'] = (
                 pd.to_datetime(data['c_jail_out']) - pd.to_datetime(data['c_jail_in']))
 
-        #cols = ['age', 'c_charge_degree', 'sex', 'age_cat', 'score_text', 'race', 'priors_count', 'length_of_stay', 'days_b_screening_arrest', 'decile_score', 'two_year_recid']
         cols = ['age', 'c_charge_degree', 'race', 'age_cat', 'score_text', 'sex', 'priors_count', 'length_of_stay', 'days_b_screening_arrest', 'decile_score', 'two_year_recid']
 
         data = data[cols]

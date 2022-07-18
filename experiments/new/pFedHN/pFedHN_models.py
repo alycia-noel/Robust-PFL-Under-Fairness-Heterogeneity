@@ -45,7 +45,8 @@ class LR(nn.Module):
 
         self.num_classes = 2
         self.fairness = fairness
-        self.bound = bound
+        self.bound = 1 / bound
+        self.eps = bound
         self.sensitive_classes = [0, 1]
         self.input_size = input_size
         self.fc1 = nn.Linear(self.input_size, 1)
@@ -55,23 +56,32 @@ class LR(nn.Module):
             self.n_constraints = 2 * self.num_classes
             self.dim_condition = self.num_classes + 1
             self.M = torch.zeros((self.n_constraints, self.dim_condition))
-            self.c = torch.tensor([.5 for x in range(self.n_constraints)])
+            self.c = torch.tensor([self.eps for x in range(self.n_constraints)])
 
             for i in range(self.n_constraints):
                 j = i % 2
-                if j == 0:
-                    self.M[i, j] = 1.0
-                    self.M[i, -1] = -1.0
-                else:
-                    self.M[i, j - 1] = -1.0
-                    self.M[i, -1] = 1.0
+
+                if i == 0 or i == 1:
+                    if j == 0:
+                        self.M[i, j] = 1.0
+                        self.M[i, -1] = -1.0
+                    else:
+                        self.M[i, j - 1] = -1.0
+                        self.M[i, -1] = 1.0
+                elif i == 2 or i == 3:
+                    if j == 0:
+                        self.M[i,j+1] = 1.0
+                        self.M[i, -1] = -1
+                    else:
+                        self.M[i, j] = -1
+                        self.M[i, -1] = 1
 
         elif self.fairness == 'eo':
             self.n_constraints = self.num_classes * self.num_classes * 2
             self.dim_condition = self.num_classes * (self.num_classes + 1)
             self.M = torch.zeros((self.n_constraints, self.dim_condition))
 
-            self.c = torch.tensor([self.bound for x in range(self.n_constraints)])
+            self.c = torch.tensor([self.eps for x in range(self.n_constraints)])
             element_k_a = self.sensitive_classes + [None]
 
             for i_a, a_0 in enumerate(self.sensitive_classes):
@@ -112,11 +122,11 @@ class LR(nn.Module):
 
         elif self.fairness == 'dp':
             sensitive = sensitive.view(out.shape)
-
+            compare = torch.tensor([]).to(sensitive.device)
             for v in self.sensitive_classes:
                 idx_true = sensitive == v
 
-                if torch.sum(idx_true.type(torch.FloatTensor)) == 0:
+                if torch.equal(out[idx_true], compare):
                     expected_values_list.append(out.mean()*0)
                 else:
                     expected_values_list.append(out[idx_true].mean())
@@ -140,7 +150,7 @@ class LR(nn.Module):
 class Constraint(torch.nn.Module):
     def __init__(self, fair, bound):
         super().__init__()
-        self.bound = bound
+        self.bound = 1 / bound
         self.fair = fair
         if self.fair == 'dp':
             self.register_parameter(name='lmbda', param=torch.nn.Parameter(torch.rand((4,1))))
@@ -148,13 +158,21 @@ class Constraint(torch.nn.Module):
             self.register_parameter(name='lmbda', param=torch.nn.Parameter(torch.rand((8,1))))
 
     def forward(self, value):
-        # with torch.no_grad():
-        #     self.lmbda.data = self.lmbda.data.clamp(min=0, max=((1/self.bound) - np.linalg.norm(self.lmbda.data.cpu().numpy())))
-        #
-        # for i, lm in enumerate(self.lmbda.data):
-        #     if lm.item() < 0:
-        #         print('hit', lm.item())
-        #         exit(1)
+        with torch.no_grad():
+            if np.linalg.norm(self.lmbda.data.cpu().numpy()) > self.bound:
+                minimum = self.lmbda.data.min()
+                for i in range(len(self.lmbda.data)):
+                    self.lmbda.data[i] = minimum
+                if np.linalg.norm(self.lmbda.data.cpu().numpy()) > self.bound:
+                    print('hit over bound')
+                    exit(1)
+
+            self.lmbda.data = torch.clamp(self.lmbda.data, min=0)
+
+        for i, lm in enumerate(self.lmbda.data):
+            if lm.item() < 0:
+                print('hit', lm.item())
+                exit(1)
 
         loss = torch.matmul(self.lmbda.T, value)
 
