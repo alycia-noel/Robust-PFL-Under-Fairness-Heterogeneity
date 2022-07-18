@@ -208,11 +208,11 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
             all_spd[i].append(spd[i])
         all_times.append(step_iter.format_dict["elapsed"])
 
-    # print("Alpha: ", alpha)
-    # file = open("/home/ancarey/FairFLHN/experiments/new/pFedHN/results/four-layer-dp-compas.txt", "a")
-    # file.write(
-    #     "\n Alpha: {13}, AVG Acc: {0:.4f}, C1 ACC: {1:.4f}, C2 ACC: {2:.4f}, C3 ACC: {3:.4f}, C4 ACC: {4:.4f}, C1 EOD: {5: .4f}, C2 EOD: {6:.4f}, C3 EOD: {7:.4f}, C4 EOD: {8:.4f}, C1 SPD: {9:.4f}, C2 SPD: {10:.4f}, C3 SPD: {11:.4f}, C4 SPD: {12:.4f}".format(np.mean(avg_acc[0]),np.mean(avg_acc[1]), np.mean(avg_acc[2]), np.mean(avg_acc[3]), np.mean(avg_acc[4]), np.mean(all_eod[0]), np.mean(all_eod[1]), np.mean(all_eod[2]), np.mean(all_eod[3]), np.mean(all_spd[0]), np.mean(all_spd[1]), np.mean(all_spd[2]), np.mean(all_spd[3]), alpha ))
-    # file.close()
+
+    file = open("/home/ancarey/FairFLHN/experiments/new/pFedHN/results/four-layer-hp-compas.txt", "a")
+    file.write(
+        "\n CLR: {13}, HLR: {14}, AVG Acc: {0:.4f}, C1 ACC: {1:.4f}, C2 ACC: {2:.4f}, C3 ACC: {3:.4f}, C4 ACC: {4:.4f}, C1 EOD: {5: .4f}, C2 EOD: {6:.4f}, C3 EOD: {7:.4f}, C4 EOD: {8:.4f}, C1 SPD: {9:.4f}, C2 SPD: {10:.4f}, C3 SPD: {11:.4f}, C4 SPD: {12:.4f}".format(np.mean(avg_acc[0]),np.mean(avg_acc[1]), np.mean(avg_acc[2]), np.mean(avg_acc[3]), np.mean(avg_acc[4]), np.mean(all_eod[0]), np.mean(all_eod[1]), np.mean(all_eod[2]), np.mean(all_eod[3]), np.mean(all_spd[0]), np.mean(all_spd[1]), np.mean(all_spd[2]), np.mean(all_spd[3]), inner_lr, lr ))
+    file.close()
 
     print(f"\n\nFinal Results | AVG Acc: {np.mean(avg_acc[0]):.4f}")
     print(all_spd)
@@ -222,38 +222,38 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
 
 
 def main():
-    #file = open("/home/ancarey/FairFLHN/experiments/new/pFedHN/results/four-layer-dp-compas.txt", "w")
-    #file.close()
+    file = open("/home/ancarey/FairFLHN/experiments/new/pFedHN/results/four-layer-hp-compas.txt", "w")
+    file.close()
 
-    dp = [.0001]#[ .0095,.0096,.0097,.0098, .0099, .001, .002, .003, .004, .005]
+    dp = [.05, .01, .005, .001, .0005, .0001] #.005 best
     #[1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2]
-    hlr = [.0005]#[1e-5, 5e-5, 1e-4, 5e-4,]
+    hlr = [1e-5]#, 5e-5, 1e-4, 5e-4,]
     steps = [5000]#[500, 1000, 2000, 2500, 5000]
 
     for i, d in enumerate(dp):
         for j, h in enumerate(hlr):
             for k, s in enumerate(steps):
-                print(d)
+                #print(d)
                 pd.set_option('display.float_format', lambda x: '%.1f' % x)
 
                 parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-                parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
+                parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
                 parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
                 parser.add_argument("--num_steps", type=int, default=s)
-                parser.add_argument("--batch_size", type=int, default=256)
+                parser.add_argument("--batch_size", type=int, default=64)
                 parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
                 parser.add_argument("--n_hidden", type=int, default=4, help="num. hidden layers")
-                parser.add_argument("--inner_lr", type=float, default=5e-5, help="learning rate for inner optimizer")
-                parser.add_argument("--lr", type=float, default=1e-5, help="learning rate")
+                parser.add_argument("--inner_lr", type=float, default=.05, help="learning rate for inner optimizer")
+                parser.add_argument("--lr", type=float, default=5e-5, help="learning rate")
                 parser.add_argument("--wd", type=float, default=1e-10, help="weight decay")
                 parser.add_argument("--inner_wd", type=float, default=1e-10, help="inner weight decay")
                 parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
                 parser.add_argument("--seed", type=int, default=0, help="seed value")
-                parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"],
+                parser.add_argument("--fair", type=str, default="dp", choices=["none", "eo", "dp", "both"],
                                     help="whether to use fairness of not.")
                 parser.add_argument("--alpha", type=int, default=[d,100], help="fairness/accuracy trade-off parameter")
-                parser.add_argument("--which_position", type=int, default=8, choices=[5, 8],
+                parser.add_argument("--which_position", type=int, default=5, choices=[5, 8],
                                     help="which position the sensitive attribute is in. 5: compas, 8: adult")
                 args = parser.parse_args()
                 set_logger()
