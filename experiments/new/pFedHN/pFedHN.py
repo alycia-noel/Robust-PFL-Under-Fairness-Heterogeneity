@@ -225,7 +225,7 @@ def main():
     file = open("/home/ancarey/FairFLHN/experiments/new/pFedHN/results/four-layer-hp-compas.txt", "w")
     file.close()
 
-    dp = [.05, .01, .005, .001, .0005, .0001] #.005 best
+    dp = [.05, .01, .005, .001, .0005, .0001] #.005, .0005 best
     #[1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2]
     hlr = [1e-5]#, 5e-5, 1e-4, 5e-4,]
     steps = [5000]#[500, 1000, 2000, 2500, 5000]
