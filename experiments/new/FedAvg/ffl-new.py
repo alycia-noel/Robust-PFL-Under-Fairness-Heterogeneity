@@ -22,13 +22,11 @@ def eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, 
     curr_results, pred, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd = evaluate(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, which_position)
     total_correct = sum([val['correct'] for val in curr_results.values()])
     total_samples = sum([val['total'] for val in curr_results.values()])
-    avg_loss = np.mean([val['loss'] for val in curr_results.values()])
     avg_acc = total_correct / total_samples
 
     all_acc = [val['correct'] / val['total'] for val in curr_results.values()]
-    all_loss = [val['loss'] for val in curr_results.values()]
 
-    return curr_results, avg_loss, avg_acc, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd
+    return curr_results, avg_acc, all_acc, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd
 
 @torch.no_grad()
 def evaluate(nodes, num_nodes, global_model, models, cnets, num_features, loss, device, fair, constraints, alpha, which_position):
@@ -42,12 +40,7 @@ def evaluate(nodes, num_nodes, global_model, models, cnets, num_features, loss, 
         true_client = []
         queries_client = []
         model = models[node_id]
-        constraint = constraints[node_id]
-
-        #model = copy.deepcopy(global_model)
-
         model.to(device)
-        constraint.to(device)
 
         running_loss, running_correct, running_samples = 0, 0, 0
 
@@ -63,11 +56,6 @@ def evaluate(nodes, num_nodes, global_model, models, cnets, num_features, loss, 
             pred, m_mu_q = model(x, s, y)
             pred_thresh = (pred > 0.5).long()
             pred_client.extend(pred_thresh.flatten().cpu().numpy())
-
-            if fair == 'none':
-                running_loss += loss(pred, y.unsqueeze(1)).item()
-            else:
-                running_loss += (loss(pred, y.unsqueeze(1)) + alpha * constraint(m_mu_q).to(device)).item() / len(batch)
 
             correct = torch.eq(pred_thresh, y.unsqueeze(1)).type(torch.cuda.LongTensor)
             running_correct += torch.count_nonzero(correct).item()
@@ -86,7 +74,6 @@ def evaluate(nodes, num_nodes, global_model, models, cnets, num_features, loss, 
         aod.append(AOD)
         eod.append(EOD)
         spd.append(SPD)
-        results[node_id]['loss'] = running_loss
         results[node_id]['correct'] = running_correct
         results[node_id]['total'] = running_samples
         preds.append(pred_client)
@@ -95,18 +82,14 @@ def evaluate(nodes, num_nodes, global_model, models, cnets, num_features, loss, 
     return results, preds, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd
 
 def train(save_file_name, device, data_name,model_name,classes_per_node,num_nodes,steps,inner_steps,lr,inner_lr,wd,inner_wd, hyper_hid,n_hidden,bs, alpha,fair, which_position):
-
     avg_acc = [[] for i in range(num_nodes + 1)]
-    all_f1 = [[] for i in range(num_nodes)]
-    all_aod = [[] for i in range(num_nodes)]
     all_eod =  [[] for i in range(num_nodes)]
     all_spd = [[] for i in range(num_nodes)]
-    all_times = [[] for i in range(10)]
     models = [None for i in range(num_nodes)]
     constraints = [None for i in range(num_nodes)]
     client_fairness = []
-    client_optimizers = [None for i in range(num_nodes)]
-    combo_parameters = [None for i in range(num_nodes)]
+    client_optimizers_theta = [None for i in range(num_nodes)]
+    client_optimizers_lambda = [None for i in range(num_nodes)]
     alphas = []
 
     for i in range(1):
@@ -121,7 +104,7 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
             total_data_length += len(nodes.train_loaders[i])
             client_data_length.append(len(nodes.train_loaders[i]))
 
-        global_model = LR(num_features, bound=.05, fairness='none')
+        global_model = LR(num_features, bound=0.05, fairness='none')
 
         # set fairness for all clients
         if fair == 'dp':
@@ -144,13 +127,12 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
 
         # Set models for all clients
         for i in range(num_nodes):
-            models[i] = LR(input_size=num_features, bound=0.05, fairness=client_fairness[i])
-            constraints[i] = Constraint(fair=client_fairness[i])
-            if fair == 'none':
-                combo_parameters[i] = list(models[i].parameters())
-            else:
-                combo_parameters[i] = list(models[i].parameters())  + list(constraints[i].parameters())
-            client_optimizers[i] = torch.optim.Adam(combo_parameters[i], lr=inner_lr, weight_decay=inner_wd)
+            models[i] = LR(input_size=num_features, bound=alpha[0], fairness=client_fairness[i])
+            constraints[i] = Constraint(fair=client_fairness[i], bound=alpha[0])
+            client_optimizers_theta[i] = torch.optim.Adam(models[i].parameters(), lr=inner_lr, weight_decay=inner_wd)
+            if fair != 'none':
+                client_optimizers_lambda[i] = torch.optim.Adam(constraints[i].parameters(), lr=inner_lr,
+                                                               weight_decay=inner_wd)
 
         global_model.to(device)
 
@@ -172,21 +154,22 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
 
                 # get client models and optimizers
                 model = models[node_id]
-                constraint = constraints[node_id]
-                combo_params = combo_parameters[node_id]
+                if fair != 'none':
+                    constraint = constraints[node_id]
+                    constraint.to(device)
                 alpha=alphas[node_id]
 
                 sd = global_model.state_dict()
                 model.load_state_dict(sd)
-
                 model.to(device)
-                constraint.to(device)
-
-                inner_optim = client_optimizers[node_id]
+                model.train()
+                inner_optim_theta = client_optimizers_theta[node_id]
+                inner_optim_lambda = client_optimizers_lambda[node_id]
 
                 for j in range(inner_steps):
-                    model.train()
-                    inner_optim.zero_grad()
+                    inner_optim_theta.zero_grad()
+                    if fair != 'none':
+                        inner_optim_lambda.zero_grad()
 
                     batch = next(iter(nodes.train_loaders[node_id]))
                     x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
@@ -198,48 +181,46 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
                     if fair == 'none':
                         err = loss(pred, y.unsqueeze(1))
                     else:
-                        err = loss(pred, y.unsqueeze(1)) + alpha * constraint(m_mu_q)
+                        err = loss(pred, y.unsqueeze(1)) + constraint(m_mu_q)
 
                     err.backward()
 
                     if fair != 'none':
-                        combo_params[len(combo_params) - 1].grad.data = -1 * combo_params[len(combo_params) - 1].grad.data
+                        for group in inner_optim_lambda.param_groups:
+                            for p in group['params']:
+                                p.grad = -1 * p.grad
 
-                    inner_optim.step()
+                    inner_optim_theta.step()
+
+                    if fair != 'none':
+                        inner_optim_lambda.step()
 
                 # delta theta and global updates
                 client_weights.append(model.fc1.weight.data.clone())
                 client_biases.append(model.fc1.bias.data.clone())
 
             new_weights = torch.zeros(size=global_model.fc1.weight.shape)
-            new_biases = torch.zeros(size=global_model.fc1.bias.shape)
 
             total_sampled_length = 0
             for i, c in enumerate(sampled):
                 total_sampled_length += client_data_length[c]
             for i, c in enumerate(sampled):
                 new_weights += ((client_data_length[c] / total_sampled_length) * client_weights[i].cpu())
-                new_biases += ((client_data_length[c] / total_sampled_length) * client_biases[i].cpu())
 
             new_weights = (new_weights).to(device)
-            new_biases = (new_biases).to(device)
 
             global_model.fc1.weight.data = new_weights.data.clone()
-            global_model.fc1.bias.data = new_biases.data.clone()
 
-        step_results, avg_loss, avg_acc_all, all_acc, all_loss, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(
+        step_results, avg_acc_all, all_acc, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(
             nodes, num_nodes, global_model, models, None, num_features, loss, device, confusion=False, fair=fair,
             constraint=constraints, alpha=alpha, which_position=which_position)
 
-        logging.info(f"\n\nFinal Results | AVG Loss: {avg_loss:.4f},  AVG Acc: {avg_acc_all:.4f}")
+        logging.info(f"\n\nFinal Results | AVG Acc: {avg_acc_all:.4f}")
         avg_acc[0].append(avg_acc_all)
         for i in range(num_nodes):
             avg_acc[i + 1].append(all_acc[i])
-            all_f1[i].append(f1[i])
-            all_aod[i].append(aod[i])
             all_eod[i].append(eod[i])
             all_spd[i].append(spd[i])
-        all_times.append(step_iter.format_dict["elapsed"])
 
     # file = open(save_file_name, "a")
     # file.write(
@@ -247,18 +228,17 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
     # file.close()
 
     print(f"\n\nFinal Results | AVG Acc: {np.mean(avg_acc[0]):.4f}")
-    #print(all_aod, all_eod, all_spd)
     for i in range(num_nodes):
         print("\nClient", i+1)
-        print(f"Acc: {np.mean(avg_acc[i+1]):.4f}, F1: {np.mean(all_f1[i]):.4f}, AOD: {np.mean(all_aod[i]):.4f}, EOD: {np.mean(all_eod[i]):.4f}, SPD: {np.mean(all_spd[i]):.4f}")
+        print(f"Acc: {np.mean(avg_acc[i+1]):.4f}, EOD: {np.mean(all_eod[i]):.4f}, SPD: {np.mean(all_spd[i]):.4f}")
 
 
 def main():
-    file = open("/home/ancarey/FairFLHN/experiments/new/FedAvg/all-runs.txt", "w")
-    file.close()
+    # file = open("/home/ancarey/FairFLHN/experiments/new/FedAvg/all-runs.txt", "w")
+    # file.close()
 
     names = ['compas']#, 'compas']
-    fair = ['dp', 'eo', 'both']
+    fair = ['none', 'dp']#['dp', 'eo', 'both']
 
     for i, n in enumerate(names):
         for j, f in enumerate(fair):
@@ -274,7 +254,7 @@ def main():
                 clr = .05
                 hlr = 5e-5
                 bs = 64
-                a1 = 60
+                a1 = .001
                 a2 = 40
 
             pd.set_option('display.float_format', lambda x: '%.1f' % x)
@@ -289,7 +269,7 @@ def main():
             parser.add_argument("--num_steps", type=int, default=5000)
             parser.add_argument("--batch_size", type=int, default=bs)
             parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
-            parser.add_argument("--n_hidden", type=int, default=3, help="num. hidden layers")
+            parser.add_argument("--n_hidden", type=int, default=4, help="num. hidden layers")
             parser.add_argument("--inner_lr", type=float, default=clr, help="learning rate for inner optimizer")
             parser.add_argument("--lr", type=float, default=hlr, help="learning rate")
             parser.add_argument("--wd", type=float, default=1e-10, help="weight decay")

@@ -145,7 +145,7 @@ def get_dataset(data_name, num_clients):
         train_data = train_data.sort_values('age').reset_index(drop=True)
         test_data = test_data.sort_values('age').reset_index(drop=True)
         splits = [train_data.index[np.searchsorted(train_data['age'], 31, side='left')],
-                  test_data.index[np.searchsorted(test_data['age'], 32, side='right')]]
+                  test_data.index[np.searchsorted(test_data['age'], 31, side='left')]]
         datasets = [train_data, test_data]
 
         cols = train_data.columns

@@ -222,38 +222,38 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
 
 
 def main():
-    file = open("/home/ancarey/FairFLHN/experiments/new/pFedHN/results/four-layer-hp-compas.txt", "w")
+    file = open("/home/ancarey/FairFLHN/experiments/new/pFedHN/results/four-layer-hp-adult.txt", "w")
     file.close()
 
-    dp = [.05, .01, .005, .001, .0005, .0001] #.005, .0005 best
-    #[1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2]
-    hlr = [1e-5]#, 5e-5, 1e-4, 5e-4,]
+    #dp = [.005]#.0000001, .5, .0025]#[.009, .008, .007, .006, .005, .004, .003, .002, .001, .0009, .0008, .0007, .0006] #.005, .0005 best
+    dp = [1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2]
+    hlr = [1e-5, 5e-5, 1e-4, 5e-4,]
     steps = [5000]#[500, 1000, 2000, 2500, 5000]
 
     for i, d in enumerate(dp):
         for j, h in enumerate(hlr):
             for k, s in enumerate(steps):
-                #print(d)
+                print('clr: ', d, 'hlr: ', h)
                 pd.set_option('display.float_format', lambda x: '%.1f' % x)
 
                 parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-                parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
+                parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
                 parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
                 parser.add_argument("--num_steps", type=int, default=s)
-                parser.add_argument("--batch_size", type=int, default=64)
+                parser.add_argument("--batch_size", type=int, default=256)
                 parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
                 parser.add_argument("--n_hidden", type=int, default=4, help="num. hidden layers")
-                parser.add_argument("--inner_lr", type=float, default=.05, help="learning rate for inner optimizer")
-                parser.add_argument("--lr", type=float, default=5e-5, help="learning rate")
+                parser.add_argument("--inner_lr", type=float, default=d, help="learning rate for inner optimizer")
+                parser.add_argument("--lr", type=float, default=h, help="learning rate")
                 parser.add_argument("--wd", type=float, default=1e-10, help="weight decay")
                 parser.add_argument("--inner_wd", type=float, default=1e-10, help="inner weight decay")
                 parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
                 parser.add_argument("--seed", type=int, default=0, help="seed value")
-                parser.add_argument("--fair", type=str, default="dp", choices=["none", "eo", "dp", "both"],
+                parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"],
                                     help="whether to use fairness of not.")
                 parser.add_argument("--alpha", type=int, default=[d,100], help="fairness/accuracy trade-off parameter")
-                parser.add_argument("--which_position", type=int, default=5, choices=[5, 8],
+                parser.add_argument("--which_position", type=int, default=8, choices=[5, 8],
                                     help="which position the sensitive attribute is in. 5: compas, 8: adult")
                 args = parser.parse_args()
                 set_logger()

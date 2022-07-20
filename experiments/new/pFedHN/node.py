@@ -1,4 +1,4 @@
-from dataset import gen_random_loaders
+from experiments.new.pFedHN.dataset import gen_random_loaders
 import torch
 
 class BaseNodes:
