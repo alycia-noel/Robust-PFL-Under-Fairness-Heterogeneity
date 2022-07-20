@@ -79,6 +79,7 @@ def clean_and_encode_dataset(data, data_name):
         data = data.loc[data['is_recid'] != -1]
         data = data.loc[data['c_charge_degree'] != "O"]
         data = data.loc[data['score_text'] != 'N/A']
+        data.replace(['African-American', 'Hispanic', 'Asian', 'Other'], ['POC', 'POC', 'POC', 'POC'], inplace=True)
         data['is_med_or_high_risk'] = (data['decile_score'] >= 5).astype(int)
         data['length_of_stay'] = (
                 pd.to_datetime(data['c_jail_out']) - pd.to_datetime(data['c_jail_in']))

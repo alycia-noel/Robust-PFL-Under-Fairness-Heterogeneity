@@ -141,7 +141,7 @@ def get_dataset(data_name, num_clients):
 
     elif data_name == 'compas':
         data = clean_and_encode_dataset(read_dataset(None, None, 'compas'), 'compas')
-        train_data, test_data = train_test_split(data, test_size=.1, train_size=.9, random_state=42, shuffle=True)
+        train_data, test_data = train_test_split(data, test_size=.15, train_size=.85, random_state=42, shuffle=True)
         train_data = train_data.sort_values('age').reset_index(drop=True)
         test_data = test_data.sort_values('age').reset_index(drop=True)
         splits = [train_data.index[np.searchsorted(train_data['age'], 31, side='left')],
