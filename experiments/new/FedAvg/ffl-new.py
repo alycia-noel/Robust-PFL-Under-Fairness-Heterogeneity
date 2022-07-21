@@ -12,21 +12,21 @@ import copy
 import pandas as pd
 import torch.utils.data
 from tqdm import trange
-from models import LR, Constraint
-from node import BaseNodes
-from utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
+from experiments.new.pFedHN.pFedHN_models import LR, Constraint
+from experiments.new.pFedHN.node import BaseNodes
+from experiments.new.pFedHN.utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
 from torch.utils.tensorboard import SummaryWriter
 warnings.filterwarnings("ignore")
 
 def eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, confusion, which_position):
-    curr_results, pred, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd = evaluate(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, which_position)
+    curr_results, preds, true, a, f_a, m_a, eod, spd = evaluate(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, which_position)
     total_correct = sum([val['correct'] for val in curr_results.values()])
     total_samples = sum([val['total'] for val in curr_results.values()])
     avg_acc = total_correct / total_samples
 
     all_acc = [val['correct'] / val['total'] for val in curr_results.values()]
 
-    return curr_results, avg_acc, all_acc, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd
+    return curr_results, avg_acc, all_acc, f_a, m_a, eod, spd
 
 @torch.no_grad()
 def evaluate(nodes, num_nodes, global_model, models, cnets, num_features, loss, device, fair, constraints, alpha, which_position):
@@ -64,14 +64,11 @@ def evaluate(nodes, num_nodes, global_model, models, cnets, num_features, loss, 
 
         tp, fp, tn, fn = TP_FP_TN_FN(queries_client, pred_client, true_client, which_position)
 
-        f1_score_prediction, f1_female, f1_male, accuracy, f_acc, m_acc, AOD, EOD, SPD = metrics(tp, fp, tn, fn)
-        f1.append(f1_score_prediction)
-        f1_f.append(f1_female)
-        f1_m.append(f1_male)
+        accuracy, f_acc, m_acc, EOD, SPD = metrics(tp, fp, tn, fn)
+
         a.append(accuracy)
         f_a.append(f_acc)
         m_a.append(m_acc)
-        aod.append(AOD)
         eod.append(EOD)
         spd.append(SPD)
         results[node_id]['correct'] = running_correct
@@ -79,7 +76,7 @@ def evaluate(nodes, num_nodes, global_model, models, cnets, num_features, loss, 
         preds.append(pred_client)
         true.append(true_client)
 
-    return results, preds, true, f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd
+    return results, preds, true, a, f_a, m_a, eod, spd
 
 def train(save_file_name, device, data_name,model_name,classes_per_node,num_nodes,steps,inner_steps,lr,inner_lr,wd,inner_wd, hyper_hid,n_hidden,bs, alpha,fair, which_position):
     avg_acc = [[] for i in range(num_nodes + 1)]
@@ -211,7 +208,7 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
 
             global_model.fc1.weight.data = new_weights.data.clone()
 
-        step_results, avg_acc_all, all_acc, f1, f1_f, f1_m, f_a, m_a, aod, eod, spd = eval_model(
+        step_results, avg_acc_all, all_acc, f_a, m_a, eod, spd = eval_model(
             nodes, num_nodes, global_model, models, None, num_features, loss, device, confusion=False, fair=fair,
             constraint=constraints, alpha=alpha, which_position=which_position)
 
@@ -237,8 +234,8 @@ def main():
     # file = open("/home/ancarey/FairFLHN/experiments/new/FedAvg/all-runs.txt", "w")
     # file.close()
 
-    names = ['adult']#, 'compas']
-    fair = ['none', 'dp']#['dp', 'eo', 'both']
+    names = ['compas']#, 'compas']
+    fair = ['dp']#['dp', 'eo', 'both']
 
     for i, n in enumerate(names):
         for j, f in enumerate(fair):
@@ -247,10 +244,10 @@ def main():
                 clr = .001
                 hlr = 1e-5
                 bs = 256
-                a1 = .01
+                a1 = .001
                 a2 = 100
             elif n == 'compas':
-                important = 5
+                important = 2
                 clr = .05
                 hlr = 5e-5
                 bs = 64
