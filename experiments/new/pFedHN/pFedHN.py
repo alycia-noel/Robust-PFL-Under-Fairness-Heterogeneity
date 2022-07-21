@@ -65,7 +65,7 @@ def evaluate(nodes, num_nodes, hnet, models, device, which_position):
             running_samples += len(y)
 
         tp, fp, tn, fn = TP_FP_TN_FN(queries_client, pred_client, true_client, which_position)
-
+        print(tp, fp, tn, fn)
         accuracy, f_acc, m_acc, EOD, SPD = metrics(tp, fp, tn, fn)
 
         a.append(accuracy)
@@ -252,7 +252,7 @@ def main():
                 parser.add_argument("--seed", type=int, default=0, help="seed value")
                 parser.add_argument("--fair", type=str, default="dp", choices=["none", "eo", "dp", "both"],
                                     help="whether to use fairness of not.")
-                parser.add_argument("--alpha", type=int, default=[.1,100], help="fairness/accuracy trade-off parameter")
+                parser.add_argument("--alpha", type=int, default=[.01,100], help="fairness/accuracy trade-off parameter")
                 parser.add_argument("--which_position", type=int, default=2, choices=[5, 8],
                                     help="which position the sensitive attribute is in. 5: compas, 8: adult")
                 args = parser.parse_args()

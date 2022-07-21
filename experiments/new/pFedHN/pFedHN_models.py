@@ -122,12 +122,14 @@ class LR(nn.Module):
 
         elif self.fairness == 'dp':
             sensitive = sensitive.view(out.shape)
+
             compare = torch.tensor([]).to(sensitive.device)
             for v in self.sensitive_classes:
                 idx_true = sensitive == v
 
                 if torch.equal(out[idx_true], compare):
                     expected_values_list.append(out.mean()*0)
+                    #print('exp value 0: ', out[idx_true], idx_true)
                 else:
                     expected_values_list.append(out[idx_true].mean())
             expected_values_list.append(out.mean())

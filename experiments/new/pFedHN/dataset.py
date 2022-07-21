@@ -79,7 +79,7 @@ def clean_and_encode_dataset(data, data_name):
         data = data.loc[data['is_recid'] != -1]
         data = data.loc[data['c_charge_degree'] != "O"]
         data = data.loc[data['score_text'] != 'N/A']
-        data.replace(['African-American', 'Hispanic', 'Asian', 'Other'], ['POC', 'POC', 'POC', 'POC'], inplace=True)
+        data.replace(['African-American', 'Hispanic', 'Asian', 'Other', 'Native American'], ['POC', 'POC', 'POC', 'POC', 'POC'], inplace=True)
         data['is_med_or_high_risk'] = (data['decile_score'] >= 5).astype(int)
         data['length_of_stay'] = (
                 pd.to_datetime(data['c_jail_out']) - pd.to_datetime(data['c_jail_in']))
@@ -138,7 +138,7 @@ def get_dataset(data_name, num_clients):
 
     elif data_name == 'compas':
         data = clean_and_encode_dataset(read_dataset(None, None, 'compas'), 'compas')
-        train_data, test_data = train_test_split(data, test_size=.15, train_size=.85, random_state=42, shuffle=True)
+        train_data, test_data = train_test_split(data, test_size=.10, train_size=.9, random_state=42, shuffle=True)
         train_data = train_data.sort_values('age').reset_index(drop=True)
         test_data = test_data.sort_values('age').reset_index(drop=True)
         splits = [train_data.index[np.searchsorted(train_data['age'], 31, side='left')],
@@ -152,7 +152,7 @@ def get_dataset(data_name, num_clients):
     return datasets, splits, features, labels
 
 def gen_random_loaders(data_name, num_clients, bz):
-    loader_params = {"batch_size": bz, "shuffle": False, "pin_memory": True, "num_workers": 0}
+    loader_params = {"batch_size": bz, "shuffle": True, "pin_memory": True, "num_workers": 0}
 
     dataloaders = []
 
@@ -190,6 +190,7 @@ def gen_random_loaders(data_name, num_clients, bz):
             loader_params['shuffle'] = True
         else:
             loader_params['shuffle'] = False
+
         dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params), subsets)))
 
     return dataloaders, features
