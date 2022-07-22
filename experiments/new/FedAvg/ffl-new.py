@@ -160,6 +160,7 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
                 model.load_state_dict(sd)
                 model.to(device)
                 model.train()
+
                 inner_optim_theta = client_optimizers_theta[node_id]
                 inner_optim_lambda = client_optimizers_lambda[node_id]
 
@@ -197,16 +198,18 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
                 client_biases.append(model.fc1.bias.data.clone())
 
             new_weights = torch.zeros(size=global_model.fc1.weight.shape)
+            new_bias = torch.zeros(size=global_model.fc1.bias.shape)
 
             total_sampled_length = 0
             for i, c in enumerate(sampled):
                 total_sampled_length += client_data_length[c]
             for i, c in enumerate(sampled):
                 new_weights += ((client_data_length[c] / total_sampled_length) * client_weights[i].cpu())
-
+                new_bias += ((client_data_length[c] / total_sampled_length) * client_biases[i].cpu())
             new_weights = (new_weights).to(device)
-
+            new_biases = (new_bias).to(device)
             global_model.fc1.weight.data = new_weights.data.clone()
+            global_model.fc1.bias.data = new_biases.data.clone()
 
         step_results, avg_acc_all, all_acc, f_a, m_a, eod, spd = eval_model(
             nodes, num_nodes, global_model, models, None, num_features, loss, device, confusion=False, fair=fair,
@@ -247,11 +250,11 @@ def main():
                 a1 = .001
                 a2 = 100
             elif n == 'compas':
-                important = 2
+                important = 5
                 clr = .05
                 hlr = 5e-5
                 bs = 64
-                a1 = .001
+                a1 = .01
                 a2 = 40
 
             print(clr, hlr, a1, n, f)
