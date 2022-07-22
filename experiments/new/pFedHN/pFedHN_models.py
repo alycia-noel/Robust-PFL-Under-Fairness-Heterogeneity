@@ -80,42 +80,66 @@ class LR(nn.Module):
             self.n_constraints = self.num_classes * self.num_classes * 2
             self.dim_condition = self.num_classes * (self.num_classes + 1)
             self.M = torch.zeros((self.n_constraints, self.dim_condition))
-
             self.c = torch.tensor([self.eps for x in range(self.n_constraints)])
-            element_k_a = self.sensitive_classes + [None]
 
-            for i_a, a_0 in enumerate(self.sensitive_classes):
-                for i_y, y_0 in enumerate(self.y_classes):
-                    for i_s, s in enumerate([-1, 1]):
-                        for j_y, y_1 in enumerate(self.y_classes):
-                            for j_a, a_1 in enumerate(element_k_a):
-                                i = i_a * (2 * self.num_classes) + i_y * 2 + i_s
-                                j = j_y + self.num_classes * j_a
-                                self.M[i, j] = self.__element_M(a_0, a_1, y_1, y_1, s)
+            for i in range(self.n_constraints):
+                j = i % 4
 
-    def __element_M(self, a0, a1, y0, y1, s):
-        if a0 is None or a1 is None:
-            x = y0 == y1
-            return -1 * s * x
-        else:
-            x = (a0 == a1) & (y0 == y1)
-            return s * float(x)
+                if i == 0 or i == 1 or i == 2 or i == 3:
+                    if j == 0:
+                        self.M[i, j] = 1.0
+                        self.M[i, -2] = -1
+                        self.M[i, -1] = -1
+                    elif j == 1:
+                        self.M[i, j - 1] = -1.0
+                        self.M[i, -2] = 1
+                        self.M[i, -1] = 1
+                    elif j == 2:
+                        self.M[i, j - 1] = 1.0
+                        self.M[i, -2] = -1
+                        self.M[i, -1] = -1
+                    elif j == 3:
+                        self.M[i, j - 2] = -1.0
+                        self.M[i, -2] = 1
+                        self.M[i, -1] = 1
+                if i == 4 or i == 5 or i == 6 or i == 7:
+                    if j == 0:
+                        self.M[i, j + 2] = 1.0
+                        self.M[i, -2] = -1
+                        self.M[i, -1] = -1
+                    elif j == 1:
+                        self.M[i, j + 1] = -1.0
+                        self.M[i, -2] = 1
+                        self.M[i, -1] = 1
+                    elif j == 2:
+                        self.M[i, j + 1] = 1.0
+                        self.M[i, -2] = -1
+                        self.M[i, -1] = -1
+                    elif j == 3:
+                        self.M[i, j] = -1.0
+                        self.M[i, -2] = 1
+                        self.M[i, -1] = 1
 
     def mu_f(self, out, sensitive, y):
         expected_values_list = []
-
         if self.fairness == 'eo':
+            compare = torch.tensor([]).to(sensitive.device)
+
             for u in self.sensitive_classes:
                 for v in self.y_classes:
                     idx_true = (y == v) * (sensitive == u)
-                    if torch.sum(idx_true.type(torch.FloatTensor)) == 0:
+
+                    if torch.equal(out[idx_true], compare):
                         expected_values_list.append(out.mean() * 0)
                     else:
                         expected_values_list.append(out[idx_true].mean())
 
             for v in self.y_classes:
                 idx_true = y == v
+                #print('this is broken:', torch.sum(idx_true.type(torch.FloatTensor)))
                 if torch.sum(idx_true.type(torch.FloatTensor)) == 0:
+                    print(torch.sum(idx_true.type(torch.FloatTensor)))
+                    exit(1)
                     expected_values_list.append(out.mean() * 0)
                 else:
                     expected_values_list.append(out[idx_true].mean())
@@ -129,7 +153,6 @@ class LR(nn.Module):
 
                 if torch.equal(out[idx_true], compare):
                     expected_values_list.append(out.mean()*0)
-                    #print('exp value 0: ', out[idx_true], idx_true)
                 else:
                     expected_values_list.append(out[idx_true].mean())
             expected_values_list.append(out.mean())
@@ -137,7 +160,10 @@ class LR(nn.Module):
         return torch.stack(expected_values_list)
 
     def M_mu_q(self, pred, sensitive, y):
-        return torch.mv(self.M.to(pred.device), self.mu_f(pred, sensitive, y)) - self.c.to(pred.device)
+        const = torch.mv(self.M.to(pred.device), self.mu_f(pred, sensitive, y)) - self.c.to(pred.device)
+        #print(self.mu_f(pred, sensitive, y))
+        #print(const)
+        return const
 
     def forward(self, x, s, y):
         prediction = torch.sigmoid(self.fc1(x))

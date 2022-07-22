@@ -237,7 +237,7 @@ def main():
     # file = open("/home/ancarey/FairFLHN/experiments/new/FedAvg/all-runs.txt", "w")
     # file.close()
 
-    names = ['compas']#, 'compas']
+    names = ['adult']#, 'compas']
     fair = ['dp']#['dp', 'eo', 'both']
 
     for i, n in enumerate(names):
@@ -247,7 +247,7 @@ def main():
                 clr = .001
                 hlr = 1e-5
                 bs = 256
-                a1 = .001
+                a1 = .01
                 a2 = 100
             elif n == 'compas':
                 important = 5

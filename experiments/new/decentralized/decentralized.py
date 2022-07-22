@@ -211,7 +211,7 @@ def main():
     parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
     parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
     parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
-    parser.add_argument("--num_steps", type=int, default=62500)
+    parser.add_argument("--num_steps", type=int, default=5000)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
     parser.add_argument("--n_hidden", type=int, default=4, help="num. hidden layers")
@@ -226,7 +226,7 @@ def main():
     parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results",
                         help="dir path for output file")
     parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="none", choices=["none", "eo", "dp", "both"],
+    parser.add_argument("--fair", type=str, default="dp", choices=["none", "eo", "dp", "both"],
                         help="whether to use fairness of not.")
     parser.add_argument("--alpha", type=int, default=[.01,100], help="fairness/accuracy trade-off parameter")
     parser.add_argument("--which_position", type=int, default=8, choices=[5, 8],
