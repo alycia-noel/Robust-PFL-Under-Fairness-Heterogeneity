@@ -10,7 +10,7 @@ import torch
 import pandas as pd
 import torch.utils.data
 from tqdm import trange
-from pFedHN_models import LRHyper, LR, Constraint, ConstraintOptimizer
+from pFedHN_models import LRHyper, LR, Constraint
 from node import BaseNodes
 from utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
 warnings.filterwarnings("ignore")
@@ -82,6 +82,7 @@ def evaluate(nodes, num_nodes, hnet, models, device, which_position):
 
 def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr, inner_lr, wd, inner_wd, hyper_hid, n_hidden, bs, alpha, fair, which_position):
 
+    b = 1/alpha[0]
     avg_acc = [[] for i in range(num_nodes + 1)]
     all_eod =  [[] for i in range(num_nodes)]
     all_spd = [[] for i in range(num_nodes)]
@@ -126,10 +127,10 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
 
         for i in range(num_nodes):
             models[i] = LR(input_size=num_features, bound=alpha[0], fairness=client_fairness[i])
-            constraints[i] = Constraint(bound=alpha[0], relation='le', size=mu_size)
+            constraints[i] = Constraint(bound=alpha[0], fair=client_fairness[i])
             client_optimizers_theta[i] = torch.optim.Adam(models[i].parameters(), lr=inner_lr, weight_decay=inner_wd)
             if fair != 'none':
-                client_optimizers_lambda[i] = ConstraintOptimizer(torch.optim.Adam, constraints[i].parameters(), inner_lr*inner_lr)
+                client_optimizers_lambda[i] = torch.optim.Adam(constraints[i].parameters(), lr=inner_lr, weight_decay=inner_wd)
 
         hnet.to(device)
 
@@ -158,6 +159,7 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
             model.to(device)
             inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
             model.train()
+
             for j in range(inner_steps):
                 inner_optim_theta.zero_grad()
                 if fair != 'none':
@@ -178,13 +180,25 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
                     err = er.mean()
 
                 err.backward()
-                torch.nn.utils.clip_grad_norm(model.parameters(), 50)
                 inner_optim_theta.step()
 
                 if fair != 'none':
-                    torch.nn.utils.clip_grad_norm_(constraint.lmbda, (1 / .01), norm_type=1)
                     constraint.lmbda.data = torch.clamp(constraint.lmbda.data, min=0)
-                    print(constraint.lmbda)
+                    torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1)
+
+                    if torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1) > b:
+                        print(torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1))
+                        print(constraint.lmbda)
+                        exit(1)
+
+                    for i, item in enumerate(constraint.lmbda.data):
+                        if item < 0:
+                            print(constraint.lmbda)
+                            exit(2)
+
+                    for group in inner_optim_lambda.param_groups:
+                        for p in group['params']:
+                            p.grad = -1 * p.grad
 
                     inner_optim_lambda.step()
 
@@ -248,7 +262,7 @@ def main():
                 parser.add_argument("--inner_wd", type=float, default=1e-10, help="inner weight decay")
                 parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
                 parser.add_argument("--seed", type=int, default=0, help="seed value")
-                parser.add_argument("--fair", type=str, default="eo", choices=["none", "eo", "dp", "both"],
+                parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"],
                                     help="whether to use fairness of not.")
                 parser.add_argument("--alpha", type=int, default=[.01,.01], help="fairness/accuracy trade-off parameter")
                 parser.add_argument("--which_position", type=int, default=8, choices=[5, 8],

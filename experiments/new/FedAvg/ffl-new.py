@@ -79,6 +79,7 @@ def evaluate(nodes, num_nodes, global_model, models, cnets, num_features, loss, 
     return results, preds, true, a, f_a, m_a, eod, spd
 
 def train(save_file_name, device, data_name,model_name,classes_per_node,num_nodes,steps,inner_steps,lr,inner_lr,wd,inner_wd, hyper_hid,n_hidden,bs, alpha,fair, which_position):
+    b = 1/alpha[0]
     avg_acc = [[] for i in range(num_nodes + 1)]
     all_eod =  [[] for i in range(num_nodes)]
     all_spd = [[] for i in range(num_nodes)]
@@ -179,18 +180,32 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
                     if fair == 'none':
                         err = loss(pred, y.unsqueeze(1))
                     else:
-                        err = loss(pred, y.unsqueeze(1)) + constraint(m_mu_q)
+                        l = loss(pred, y.unsqueeze(1))
+                        c = constraint(m_mu_q)
+                        er = l + c
+                        err = er.mean()
 
                     err.backward()
+                    inner_optim_theta.step()
 
                     if fair != 'none':
+                        constraint.lmbda.data = torch.clamp(constraint.lmbda.data, min=0)
+                        torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1)
+
+                        if torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1) > b:
+                            print(torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1))
+                            print(constraint.lmbda)
+                            exit(1)
+
+                        for i, item in enumerate(constraint.lmbda.data):
+                            if item < 0:
+                                print(constraint.lmbda)
+                                exit(2)
+
                         for group in inner_optim_lambda.param_groups:
                             for p in group['params']:
                                 p.grad = -1 * p.grad
 
-                    inner_optim_theta.step()
-
-                    if fair != 'none':
                         inner_optim_lambda.step()
 
                 # delta theta and global updates
