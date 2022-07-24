@@ -1,7 +1,9 @@
 from collections import OrderedDict
 import torch
+import sys
 from torch import nn
 import numpy as np
+import torch.nn.functional as F
 
 class LRHyper(nn.Module):
     def __init__(self, device,n_nodes, embedding_dim, context_vector_size, hidden_size, hnet_hidden_dim = 100, hnet_n_hidden=3):
@@ -50,6 +52,7 @@ class LR(nn.Module):
         self.sensitive_classes = [0, 1]
         self.input_size = input_size
         self.fc1 = nn.Linear(self.input_size, 1)
+
         self.y_classes = [0, 1]
 
         if self.fairness == 'dp':
@@ -123,12 +126,15 @@ class LR(nn.Module):
     def mu_f(self, out, sensitive, y):
         expected_values_list = []
         if self.fairness == 'eo':
+            #print("out: ", out)
             compare = torch.tensor([]).to(sensitive.device)
 
             for u in self.sensitive_classes:
                 for v in self.y_classes:
                     idx_true = (y == v) * (sensitive == u)
-
+                    #print('out[idx_true]: ', out[idx_true])
+                    #print('mean: ', out[idx_true].mean())
+                    #print('mean * 0: ', out.mean() * 0)
                     if torch.equal(out[idx_true], compare):
                         expected_values_list.append(out.mean() * 0)
                     else:
@@ -136,10 +142,7 @@ class LR(nn.Module):
 
             for v in self.y_classes:
                 idx_true = y == v
-                #print('this is broken:', torch.sum(idx_true.type(torch.FloatTensor)))
                 if torch.sum(idx_true.type(torch.FloatTensor)) == 0:
-                    print(torch.sum(idx_true.type(torch.FloatTensor)))
-                    exit(1)
                     expected_values_list.append(out.mean() * 0)
                 else:
                     expected_values_list.append(out[idx_true].mean())
@@ -161,8 +164,6 @@ class LR(nn.Module):
 
     def M_mu_q(self, pred, sensitive, y):
         const = torch.mv(self.M.to(pred.device), self.mu_f(pred, sensitive, y)) - self.c.to(pred.device)
-        #print(self.mu_f(pred, sensitive, y))
-        #print(const)
         return const
 
     def forward(self, x, s, y):
@@ -175,34 +176,120 @@ class LR(nn.Module):
 
         return prediction, m_mu_q
 
+# class Constraint(torch.nn.Module):
+#     def __init__(self, fair, bound):
+#         super().__init__()
+#
+#         self.bound = 1 / bound
+#         self.fair = fair
+#
+#         if self.fair == 'dp':
+#             self.register_parameter(name='lmbda', param=torch.nn.Parameter(torch.rand((4,1))))
+#         elif self.fair == 'eo':
+#             self.register_parameter(name='lmbda', param=torch.nn.Parameter(torch.rand((8,1))))
+#
+#     def forward(self, value):
+#         loss = torch.matmul(self.lmbda.T, value)
+#
+#         return loss
+
 class Constraint(torch.nn.Module):
-    def __init__(self, fair, bound):
+    def __init__(self, bound, relation, name=None, multiplier_act=F.relu, alpha=0., start_val=0., size=4):
+        """
+        Adds a constraint to a loss function by turning the loss into a lagrangian.
+        Alpha is used for a moving average as described in [1].
+        Note that this is similar as using an optimizer with momentum.
+        [1] Rezende, Danilo Jimenez, and Fabio Viola.
+            "Taming vaes." arXiv preprint arXiv:1810.00597 (2018).
+        Args:
+            bound: Constraint bound.
+            relation (str): relation of constraint,
+                using naming convention from operator module (eq, le, ge).
+                Defaults to 'ge'.
+            name (str, optional): Constraint name
+            multiplier_act (optional): When using inequality relations,
+                an activation function is used to force the multiplier to be positive.
+                I've experimented with ReLU, abs and softplus, softplus seems the most stable.
+                Defaults to F.ReLU.
+            alpha (float, optional): alpha of moving average, as in [1].
+                If alpha=0, no moving average is used.
+            start_val (float, optional): Start value of multiplier. If an activation function
+                is used the true start value might be different, because this is pre-activation.
+        """
         super().__init__()
-        self.bound = 1 / bound
-        self.fair = fair
-        if self.fair == 'dp':
-            self.register_parameter(name='lmbda', param=torch.nn.Parameter(torch.rand((4,1))))
-        elif self.fair == 'eo':
-            self.register_parameter(name='lmbda', param=torch.nn.Parameter(torch.rand((8,1))))
+        self.name = name
+        self.size = size
+
+        if isinstance(bound, (int, float)):
+            self.bound = torch.Tensor([bound])
+        elif isinstance(bound, list):
+            self.bound = torch.Tensor(bound)
+        else:
+            self.bound = bound
+
+        if relation in {'ge', 'le', 'eq'}:
+            self.relation = relation
+        else:
+            raise ValueError('Unknown relation: {}'.format(relation))
+
+        if self.relation == 'eq' and multiplier_act is not None:
+            sys.stderr.write(
+                "WARNING using an activation that maps to R+ with an equality \
+                 constraint turns it into an inequality constraint"
+            )
+
+        self.lmbda = torch.nn.Parameter(torch.rand(self.size,1))
+        self._act = multiplier_act
+
+        self.alpha = alpha
+        self.avg_value = None
+
+    @property
+    def multiplier(self):
+        if self._act is not None:
+            return self._act(self.lmbda)
+        return self.lmbda
 
     def forward(self, value):
-        with torch.no_grad():
-            if np.linalg.norm(self.lmbda.data.cpu().numpy()) > self.bound:
-                minimum = self.lmbda.data.min()
-                for i in range(len(self.lmbda.data)):
-                    self.lmbda.data[i] = minimum
-                if np.linalg.norm(self.lmbda.data.cpu().numpy()) > self.bound:
-                    print('hit over bound')
-                    exit(1)
+        loss = value - self.bound.to(value.device)
+        return self.multiplier.T * loss
 
-            self.lmbda.data = torch.clamp(self.lmbda.data, min=0)
+class Wrapper:
+    """
+    Simple class wrapper around  obj = obj_type(*args, **kwargs).
+    Overwrites methods from obj with methods defined in Wrapper,
+    else uses method from obj.
+    """
 
-        for i, lm in enumerate(self.lmbda.data):
-            if lm.item() < 0:
-                print('hit', lm.item())
-                exit(1)
+    def __init__(self, obj_type, *args, **kwargs):
+        self.obj = obj_type(*args, **kwargs)
 
-        loss = torch.matmul(self.lmbda.T, value)
+    def __getattr__(self, attr):
+        if attr in self.__dict__:
+            return getattr(self, attr)
+        return getattr(self.obj, attr)
 
-        return loss
+    def __repr__(self):
+        return 'Wrapped(' + self.obj.__repr__() + ')'
 
+class ConstraintOptimizer(Wrapper):
+    """
+    Pytorch Optimizers only do gradient descent, but lagrangian needs
+    gradient ascent for the multipliers. ConstraintOptimizer changes
+    step() method of optimizer to do ascent instead of descent.
+    I've gotten the best results using RMSprop with lr
+    around 1e-3 and Constraint alpha=0.5.
+    """
+
+    def __init__(self, optimizer: torch.optim.Optimizer, *args, **kwargs):
+        super().__init__(optimizer, *args, **kwargs)
+
+    def step(self, *args, **kwargs):
+        # Maximize instead of minimize.
+        for group in self.obj.param_groups:
+            for p in group['params']:
+                p.grad = -p.grad
+        self.obj.step(*args, **kwargs)
+
+    def __repr__(self):
+        return 'ConstraintOptimizer (' + self.obj.__repr__() + ')'

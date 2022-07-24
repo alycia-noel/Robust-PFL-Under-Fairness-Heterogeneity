@@ -10,7 +10,7 @@ import torch
 import pandas as pd
 import torch.utils.data
 from tqdm import trange
-from pFedHN_models import LRHyper, LR, Constraint
+from pFedHN_models import LRHyper, LR, Constraint, ConstraintOptimizer
 from node import BaseNodes
 from utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
 warnings.filterwarnings("ignore")
@@ -99,13 +99,16 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
         nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node)
         num_features = len(nodes.features)
         embed_dim = num_features
+        mu_size = 0
 
         if fair == 'dp':
             client_fairness = ['dp' for i in range(num_nodes)]
             alphas = [alpha[0] for i in range(num_nodes)]
+            mu_size = 4
         elif fair == 'eo':
             client_fairness = ['eo' for i in range(num_nodes)]
             alphas = [alpha[1] for i in range(num_nodes)]
+            mu_size = 8
         elif fair == 'both':
             for i in range(num_nodes):
                 if i % 2 == 0:
@@ -123,10 +126,10 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
 
         for i in range(num_nodes):
             models[i] = LR(input_size=num_features, bound=alpha[0], fairness=client_fairness[i])
-            constraints[i] = Constraint(fair=client_fairness[i], bound=alpha[0])
+            constraints[i] = Constraint(bound=alpha[0], relation='le', size=mu_size)
             client_optimizers_theta[i] = torch.optim.Adam(models[i].parameters(), lr=inner_lr, weight_decay=inner_wd)
             if fair != 'none':
-                client_optimizers_lambda[i] = torch.optim.Adam(constraints[i].parameters(), lr=inner_lr, weight_decay=inner_wd)
+                client_optimizers_lambda[i] = ConstraintOptimizer(torch.optim.Adam, constraints[i].parameters(), inner_lr*inner_lr)
 
         hnet.to(device)
 
@@ -141,7 +144,6 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
             node_id = random.choice(nodes_choices)
 
             model = models[node_id]
-
             alpha=alphas[node_id]
 
             if fair != 'none':
@@ -155,7 +157,6 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
             model.load_state_dict(weights)
             model.to(device)
             inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
-
             model.train()
             for j in range(inner_steps):
                 inner_optim_theta.zero_grad()
@@ -168,31 +169,29 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
                 s = x[:, which_position].to(device)
 
                 pred, m_mu_q = model(x, s, y)
-
                 if fair == 'none':
                     err = loss(pred, y.unsqueeze(1))
                 else:
-                    err = loss(pred, y.unsqueeze(1)) + constraint(m_mu_q)
+                    l = loss(pred, y.unsqueeze(1))
+                    c = constraint(m_mu_q)
+                    er = l + c
+                    err = er.mean()
 
                 err.backward()
-
-                if fair != 'none':
-                    for group in inner_optim_lambda.param_groups:
-                        for p in group['params']:
-                            p.grad = -1*p.grad
-                            # if node_id == 3:
-                            #     print(p.grad)
-
+                torch.nn.utils.clip_grad_norm(model.parameters(), 50)
                 inner_optim_theta.step()
 
                 if fair != 'none':
+                    torch.nn.utils.clip_grad_norm_(constraint.lmbda, (1 / .01), norm_type=1)
+                    constraint.lmbda.data = torch.clamp(constraint.lmbda.data, min=0)
+                    print(constraint.lmbda)
+
                     inner_optim_lambda.step()
 
             optimizer.zero_grad()
             final_state = model.state_dict()
             delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
             hnet_grads = torch.autograd.grad(list(weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values()))
-
             for p, g in zip(hnet.parameters(), hnet_grads):
                 p.grad = g
 
@@ -251,7 +250,7 @@ def main():
                 parser.add_argument("--seed", type=int, default=0, help="seed value")
                 parser.add_argument("--fair", type=str, default="eo", choices=["none", "eo", "dp", "both"],
                                     help="whether to use fairness of not.")
-                parser.add_argument("--alpha", type=int, default=[.1,.01], help="fairness/accuracy trade-off parameter")
+                parser.add_argument("--alpha", type=int, default=[.01,.01], help="fairness/accuracy trade-off parameter")
                 parser.add_argument("--which_position", type=int, default=8, choices=[5, 8],
                                     help="which position the sensitive attribute is in. 5: compas, 8: adult")
                 args = parser.parse_args()
@@ -259,7 +258,6 @@ def main():
                 device = "cuda:2"
                 print(args.alpha[0], args.which_position)
                 args.classes_per_node = 2
-                #.0216, -.0407, -.1424, -.1293
                 train(
                     device=device,
                     data_name=args.data_name,
