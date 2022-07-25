@@ -126,8 +126,8 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
                        hidden_size=num_features, hnet_hidden_dim=hyper_hid, hnet_n_hidden=n_hidden)
 
         for i in range(num_nodes):
-            models[i] = LR(input_size=num_features, bound=alpha[0], fairness=client_fairness[i])
-            constraints[i] = Constraint(bound=alpha[0], fair=client_fairness[i])
+            models[i] = LR(input_size=num_features, bound=alphas[i], fairness=client_fairness[i])
+            constraints[i] = Constraint(bound=alphas[i], fair=client_fairness[i])
             client_optimizers_theta[i] = torch.optim.Adam(models[i].parameters(), lr=inner_lr, weight_decay=inner_wd)
             if fair != 'none':
                 client_optimizers_lambda[i] = torch.optim.Adam(constraints[i].parameters(), lr=inner_lr, weight_decay=inner_wd)
@@ -262,9 +262,9 @@ def main():
                 parser.add_argument("--inner_wd", type=float, default=1e-10, help="inner weight decay")
                 parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
                 parser.add_argument("--seed", type=int, default=0, help="seed value")
-                parser.add_argument("--fair", type=str, default="dp", choices=["none", "eo", "dp", "both"],
+                parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"],
                                     help="whether to use fairness of not.")
-                parser.add_argument("--alpha", type=int, default=[.05,.01], help="fairness/accuracy trade-off parameter")
+                parser.add_argument("--alpha", type=int, default=[.01,.1], help="fairness/accuracy trade-off parameter")
                 parser.add_argument("--which_position", type=int, default=5, choices=[5, 8],
                                     help="which position the sensitive attribute is in. 5: compas, 8: adult")
                 args = parser.parse_args()

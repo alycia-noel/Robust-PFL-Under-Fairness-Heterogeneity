@@ -127,8 +127,8 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
 
         # Set models for all clients
         for i in range(num_nodes):
-            models[i] = LR(input_size=num_features, bound=alpha[0], fairness=client_fairness[i])
-            constraints[i] = Constraint(fair=client_fairness[i], bound=alpha[0])
+            models[i] = LR(input_size=num_features, bound=alphas[i], fairness=client_fairness[i])
+            constraints[i] = Constraint(fair=client_fairness[i], bound=alphas[i])
             client_optimizers_theta[i] = torch.optim.Adam(models[i].parameters(), lr=inner_lr, weight_decay=inner_wd)
             if fair != 'none':
                 client_optimizers_lambda[i] = torch.optim.Adam(constraints[i].parameters(), lr=inner_lr,
@@ -254,7 +254,7 @@ def main():
     # file = open("/home/ancarey/FairFLHN/experiments/new/FedAvg/all-runs.txt", "w")
     # file.close()
 
-    names = ['adult']#, 'compas']
+    names = ['compas']#, 'compas']
     fair = ['both']#['dp', 'eo', 'both']
 
     for i, n in enumerate(names):
@@ -272,9 +272,9 @@ def main():
                 hlr = 5e-5
                 bs = 64
                 a1 = .01
-                a2 = 40
+                a2 = .1
 
-            print(clr, hlr, a1, n, f)
+            print(clr, hlr, a1, a2, n, f)
             pd.set_option('display.float_format', lambda x: '%.1f' % x)
 
             writer = SummaryWriter('results')
