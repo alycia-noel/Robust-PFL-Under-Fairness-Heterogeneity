@@ -40,6 +40,8 @@ def evaluate(nodes, num_nodes, global_model, models, cnets, num_features, loss, 
         true_client = []
         queries_client = []
         model = models[node_id]
+        sd = global_model.state_dict()
+        model.load_state_dict(sd)
         model.to(device)
 
         running_loss, running_correct, running_samples = 0, 0, 0
@@ -253,7 +255,7 @@ def main():
     # file.close()
 
     names = ['adult']#, 'compas']
-    fair = ['dp']#['dp', 'eo', 'both']
+    fair = ['both']#['dp', 'eo', 'both']
 
     for i, n in enumerate(names):
         for j, f in enumerate(fair):
@@ -263,7 +265,7 @@ def main():
                 hlr = 1e-5
                 bs = 256
                 a1 = .01
-                a2 = 100
+                a2 = .01
             elif n == 'compas':
                 important = 5
                 clr = .05

@@ -250,22 +250,22 @@ def main():
 
                 parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-                parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
+                parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
                 parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
                 parser.add_argument("--num_steps", type=int, default=s)
-                parser.add_argument("--batch_size", type=int, default=256)
+                parser.add_argument("--batch_size", type=int, default=64)
                 parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
                 parser.add_argument("--n_hidden", type=int, default=4, help="num. hidden layers")
-                parser.add_argument("--inner_lr", type=float, default=.001, help="learning rate for inner optimizer")
-                parser.add_argument("--lr", type=float, default=1e-5, help="learning rate")
+                parser.add_argument("--inner_lr", type=float, default=.05, help="learning rate for inner optimizer")
+                parser.add_argument("--lr", type=float, default=5e-5, help="learning rate")
                 parser.add_argument("--wd", type=float, default=1e-10, help="weight decay")
                 parser.add_argument("--inner_wd", type=float, default=1e-10, help="inner weight decay")
                 parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
                 parser.add_argument("--seed", type=int, default=0, help="seed value")
-                parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"],
+                parser.add_argument("--fair", type=str, default="dp", choices=["none", "eo", "dp", "both"],
                                     help="whether to use fairness of not.")
-                parser.add_argument("--alpha", type=int, default=[.01,.01], help="fairness/accuracy trade-off parameter")
-                parser.add_argument("--which_position", type=int, default=8, choices=[5, 8],
+                parser.add_argument("--alpha", type=int, default=[.05,.01], help="fairness/accuracy trade-off parameter")
+                parser.add_argument("--which_position", type=int, default=5, choices=[5, 8],
                                     help="which position the sensitive attribute is in. 5: compas, 8: adult")
                 args = parser.parse_args()
                 set_logger()
