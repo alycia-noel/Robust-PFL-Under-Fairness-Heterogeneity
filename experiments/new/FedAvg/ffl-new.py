@@ -255,7 +255,7 @@ def main():
     # file.close()
 
     names = ['compas']#, 'compas']
-    fair = ['both']#['dp', 'eo', 'both']
+    fair = ['eo']#['dp', 'eo', 'both']
 
     for i, n in enumerate(names):
         for j, f in enumerate(fair):

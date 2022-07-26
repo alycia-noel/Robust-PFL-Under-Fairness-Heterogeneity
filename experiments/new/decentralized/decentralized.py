@@ -1,276 +1,156 @@
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = "1, 2, 3, 4, 5, 6, 7"
-import argparse
-import logging
-import random
-import time
 import warnings
-from collections import defaultdict
-import numpy as np
 import torch
-import pandas as pd
 import torch.utils.data
 from tqdm import trange
+from experiments.new.pFedHN.utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
 from experiments.new.pFedHN.pFedHN_models import LR, Constraint
 from experiments.new.pFedHN.node import BaseNodes
-from experiments.new.pFedHN.utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
-from torch.utils.tensorboard import SummaryWriter
 warnings.filterwarnings("ignore")
 
-def eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, confusion, which_position):
-    curr_results, preds, true, a, f_a, m_a, eod, spd = evaluate(nodes, num_nodes, hnet, model, device, which_position)
-    total_correct = sum([val['correct'] for val in curr_results.values()])
-    total_samples = sum([val['total'] for val in curr_results.values()])
-    avg_acc = total_correct / total_samples
-
-    all_acc = [val['correct'] / val['total'] for val in curr_results.values()]
-
-    return curr_results, avg_acc, all_acc, f_a, m_a, eod, spd
-
 @torch.no_grad()
-def evaluate(nodes, num_nodes, hnet, models, device, which_position):
-    results = defaultdict(lambda: defaultdict(list))
+def evaluate(model, device, which_position, test_loader):
     preds = []
     true = []
-    f1, f1_f, f1_m, a, f_a, m_a, aod, eod, spd = [], [], [], [], [], [], [], [], []
+    queries = []
 
-    for node_id in range(num_nodes):
-        pred_client = []
-        true_client = []
-        queries_client = []
-        model = models[node_id]
-        model.eval()
-        model.to(device)
+    model.eval()
+    model.to(device)
 
-        running_loss, running_correct, running_samples = 0, 0, 0
+    running_loss, running_correct, running_samples = 0, 0, 0
 
-        curr_data = nodes.test_loaders[node_id]
+    for batch_count, batch in enumerate(test_loader):
+        x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
+        s = x[:, which_position].to(device)
 
-        for batch_count, batch in enumerate(curr_data):
-            x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
-            s = x[:, which_position].to(device)
+        true.extend(y.cpu().numpy())
+        queries.extend(x.cpu().numpy())
 
-            true_client.extend(y.cpu().numpy())
-            queries_client.extend(x.cpu().numpy())
+        pred, m_mu_q = model(x, s, y)
+        pred_thresh = (pred > 0.5).long()
+        preds.extend(pred_thresh.flatten().cpu().numpy())
 
-            pred, m_mu_q = model(x, s, y)
-            pred_thresh = (pred > 0.5).long()
-            pred_client.extend(pred_thresh.flatten().cpu().numpy())
+        correct = torch.eq(pred_thresh, y.unsqueeze(1)).type(torch.cuda.LongTensor)
+        running_correct += torch.count_nonzero(correct).item()
 
-            #running_loss += loss(pred, y.unsqueeze(1)).item()
+        running_samples += len(y)
 
-            correct = torch.eq(pred_thresh, y.unsqueeze(1)).type(torch.cuda.LongTensor)
-            running_correct += torch.count_nonzero(correct).item()
+    tp, fp, tn, fn = TP_FP_TN_FN(queries, preds, true, which_position)
+    accuracy, f_acc, m_acc, eod, spd = metrics(tp, fp, tn, fn)
 
-            running_samples += len(y)
-
-        tp, fp, tn, fn = TP_FP_TN_FN(queries_client, pred_client, true_client, which_position)
-        print(tp, fp, tn, fn)
-        accuracy, f_acc, m_acc, EOD, SPD = metrics(tp, fp, tn, fn)
-
-        a.append(accuracy)
-        f_a.append(f_acc)
-        m_a.append(m_acc)
-        eod.append(EOD)
-        spd.append(SPD)
-        results[node_id]['correct'] = running_correct
-        results[node_id]['total'] = running_samples
-        preds.append(pred_client)
-        true.append(true_client)
-
-    return results, preds, true, a, f_a, m_a, eod, spd
+    return accuracy, eod, spd
 
 
-def train(writer, device, data_name,model_name,classes_per_node,num_nodes,steps,inner_steps,lr,inner_lr,wd,inner_wd, hyper_hid,n_hidden,bs, alpha,fair, which_position):
-    b = 1/alpha[0]
-    avg_acc = [[] for i in range(num_nodes + 1)]
-    all_f1 = [[] for i in range(num_nodes)]
-    all_aod = [[] for i in range(num_nodes)]
-    all_eod =  [[] for i in range(num_nodes)]
-    all_spd = [[] for i in range(num_nodes)]
-    all_times = [[] for i in range(10)]
-    models = [None for i in range(num_nodes)]
-    constraints = [None for i in range(num_nodes)]
-    client_fairness = []
-    client_optimizers_theta = [None for i in range(num_nodes)]
-    client_optimizers_lambda = [None for i in range(num_nodes)]
-    alphas = []
-    start = time.time()
-    for i in range(1):
-        seed_everything(0)
+def train(device, steps, lr, wd, alpha, fair, which_position, num_features, train_loader, test_loader, client_num):
+    seed_everything(0)
+    b = 1/alpha
 
-        nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node)
-        num_features = len(nodes.features)
+    model = LR(input_size=num_features, bound=alpha, fairness=fair)
+    constraint= Constraint(fair=fair, bound=alpha)
+    client_optimizers_theta = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=wd)
+    if fair != 'none':
+        client_optimizers_lambda = torch.optim.Adam(constraint.parameters(), lr=lr, weight_decay=wd)
 
-        # set fairness for all clients
-        if fair == 'dp':
-            client_fairness = ['dp' for i in range(num_nodes)]
-            alphas = [alpha[0] for i in range(num_nodes)]
-        elif fair == 'eo':
-            client_fairness = ['eo' for i in range(num_nodes)]
-            alphas = [alpha[1] for i in range(num_nodes)]
-        elif fair == 'both':
-            for i in range(num_nodes):
-                if i % 2 == 0:
-                    client_fairness.append('dp')
-                    alphas.append(alpha[0])
-                else:
-                    client_fairness.append('eo')
-                    alphas.append(alpha[0])
-        elif fair == 'none':
-            client_fairness = ['none' for i in range(num_nodes)]
-            alphas = ['none' for i in range(num_nodes)]
+    loss = torch.nn.BCELoss()
 
-        # Set models for all clients
-        for i in range(num_nodes):
-            models[i] = LR(input_size=num_features, bound=alpha[0], fairness=client_fairness[i])
-            constraints[i] = Constraint(fair=client_fairness[i], bound=alpha[0])
-            client_optimizers_theta[i] = torch.optim.Adam(models[i].parameters(), lr=inner_lr, weight_decay=inner_wd)
-            if fair != 'none':
-                client_optimizers_lambda[i] = torch.optim.Adam(constraints[i].parameters(), lr=inner_lr,
-                                                               weight_decay=inner_wd)
+    model.train()
+    model.to(device)
+    if fair != 'none':
+        constraint.to(device)
 
-        loss = torch.nn.BCELoss()
+    step_iter = trange(steps)
+    for j in step_iter:
+        client_optimizers_theta.zero_grad()
 
-        for i in range(num_nodes):
-            print("Training Client: ", i)
-            node_id = i
+        if fair != 'none':
+            client_optimizers_lambda.zero_grad()
 
-            # get client models and optimizers
-            model = models[node_id]
-            if fair != 'none':
-                constraint = constraints[node_id]
-                constraint.to(device)
+        batch = next(iter(train_loader))
+        x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
+        s = x[:, which_position].to(device)
 
-            inner_optim_theta = client_optimizers_theta[node_id]
-            inner_optim_lambda = client_optimizers_lambda[node_id]
+        pred, m_mu_q = model(x, s, y)
 
-            alpha=alphas[node_id]
-            model.to(device)
-            model.train()
+        if fair == 'none':
+            err = loss(pred, y.unsqueeze(1))
+        else:
+            err = (loss(pred, y.unsqueeze(1)) + constraint(m_mu_q)).mean()
 
-            step_iter = trange(steps)
-            for j in step_iter:
-                inner_optim_theta.zero_grad()
-                if fair != 'none':
-                    inner_optim_lambda.zero_grad()
+        err.backward()
+        client_optimizers_theta.step()
 
-                batch = next(iter(nodes.train_loaders[node_id]))
-                x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
-                s = x[:, which_position].to(device)
+        if fair != 'none':
+            constraint.lmbda.data = torch.clamp(constraint.lmbda.data, min=0)
+            torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1)
 
-                # train and update local
-                pred, m_mu_q = model(x, s, y)
+            if torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1) > b:
+                print(torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1))
+                print(constraint.lmbda)
+                exit(1)
 
-                if fair == 'none':
-                    err = loss(pred, y.unsqueeze(1))
-                else:
-                    l = loss(pred, y.unsqueeze(1))
-                    c = constraint(m_mu_q)
-                    er = l + c
-                    err = er.mean()
+            for i, item in enumerate(constraint.lmbda.data):
+                if item < 0:
+                    print(constraint.lmbda)
+                    exit(2)
 
-                err.backward()
-                inner_optim_theta.step()
+            for group in client_optimizers_lambda.param_groups:
+                for p in group['params']:
+                    p.grad = -1 * p.grad
 
-                if fair != 'none':
-                    constraint.lmbda.data = torch.clamp(constraint.lmbda.data, min=0)
-                    torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1)
+            client_optimizers_lambda.step()
 
-                    if torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1) > b:
-                        print(torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1))
-                        print(constraint.lmbda)
-                        exit(1)
-
-                    for i, item in enumerate(constraint.lmbda.data):
-                        if item < 0:
-                            print(constraint.lmbda)
-                            exit(2)
-
-                    for group in inner_optim_lambda.param_groups:
-                        for p in group['params']:
-                            p.grad = -1 * p.grad
-
-                    inner_optim_lambda.step()
-
-        end = time.time()
-        print((end - start)/60, (end-start)%60)
-        step_results, avg_acc_all, all_acc, f_a, m_a,eod, spd = eval_model(
-            nodes, num_nodes, None, models, None, num_features, loss=loss, device=device, confusion=False, fair=fair,
-            constraint=constraints, alpha=alpha, which_position=which_position)
-        logging.info(f"\n\nFinal Results | AVG Acc: {avg_acc_all:.4f}")
-        avg_acc[0].append(avg_acc_all)
-        for i in range(num_nodes):
-            avg_acc[i + 1].append(all_acc[i])
-            all_eod[i].append(eod[i])
-            all_spd[i].append(spd[i])
-
-
-    print(f"\n\nFinal Results | AVG Acc: {np.mean(avg_acc[0]):.4f}")
-
-    for i in range(num_nodes):
-        print("\nClient", i+1)
-        print(f"Acc: {np.mean(avg_acc[i+1]):.4f}, EOD: {np.mean(all_eod[i]):.4f}, SPD: {np.mean(all_spd[i]):.4f}")
+    accuracy, eod, spd = evaluate(model, device, which_position, test_loader)
+    print(f"Acc: {accuracy:.4f}, EOD: {eod:.4f}, SPD: {spd:.4f}")
 
 
 def main():
-    pd.set_option('display.float_format', lambda x: '%.1f' % x)
+    seed_everything(0)
 
-    writer = SummaryWriter('results')
+    alpha = 1
+    num_nodes = 4
+    fairness = 'dp'
+    data_name = 'compas'
+    classes_per_node = 2
+    device = 'cuda:5'
+    num_steps = 5000
+    wd = 1e-10
 
-    parser = argparse.ArgumentParser(description="Fair Hypernetworks")
+    # for compas
+    if data_name == 'compas':
+        bs = 64
+        lr = .05
+        alphas = [.01, .1]
+        which_position = 5
+    elif data_name == 'adult':
+        bs = 256
+        lr = .001
+        alphas = [.01, .01]
+        which_position = 8
 
-    parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
-    parser.add_argument("--model_name", type=str, default="LR", choices=["NN", "LR"], help="choice of model")
-    parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
-    parser.add_argument("--num_steps", type=int, default=5000)
-    parser.add_argument("--batch_size", type=int, default=256)
-    parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
-    parser.add_argument("--n_hidden", type=int, default=4, help="num. hidden layers")
-    parser.add_argument("--inner_lr", type=float, default=.001, help="learning rate for inner optimizer")
-    parser.add_argument("--lr", type=float, default=1e-5, help="learning rate")
-    parser.add_argument("--wd", type=float, default=1e-10, help="weight decay")
-    parser.add_argument("--inner_wd", type=float, default=1e-10, help="inner weight decay")
-    parser.add_argument("--embed_dim", type=int, default=10, help="embedding dim")
-    parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
-    parser.add_argument("--gpu", type=int, default=5, help="gpu device ID")
-    parser.add_argument("--eval_every", type=int, default=50, help="eval every X selected epochs")
-    parser.add_argument("--save_path", type=str, default="/home/ancarey/FairFLHN/experiments/adult/results",
-                        help="dir path for output file")
-    parser.add_argument("--seed", type=int, default=0, help="seed value")
-    parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"],
-                        help="whether to use fairness of not.")
-    parser.add_argument("--alpha", type=int, default=[.01,.01], help="fairness/accuracy trade-off parameter")
-    parser.add_argument("--which_position", type=int, default=8, choices=[5, 8],
-                        help="which position the sensitive attribute is in. 5: compas, 8: adult")
-    args = parser.parse_args()
-    assert args.gpu <= torch.cuda.device_count()
-    set_logger()
+    nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node)
+    num_features = len(nodes.features)
 
-    device = "cuda:1"
+    for i in range(num_nodes):
 
-    args.classes_per_node = 2
+        if fairness == 'none':
+            fair = 'none'
+        if fairness == 'dp':
+            fair = 'dp'
+            alpha = alphas[0]
+        elif fairness == 'eo':
+            fair = 'eo'
+            alpha = alphas[1]
+        elif fairness == 'both':
+            if i % 2 == 0:
+                fair = 'dp'
+                alpha = alphas[0]
+            else:
+                fair = 'eo'
+                alpha = alphas[1]
 
-    train(
-        writer,
-        device=device,
-        data_name=args.data_name,
-        model_name=args.model_name,
-        classes_per_node=args.classes_per_node,
-        num_nodes=args.num_nodes,
-        steps=args.num_steps,
-        inner_steps=args.inner_steps,
-        lr=args.lr,
-        inner_lr=args.inner_lr,
-        wd=args.wd,
-        inner_wd=args.inner_wd,
-        hyper_hid=args.hyper_hid,
-        n_hidden=args.n_hidden,
-        bs=args.batch_size,
-        alpha=args.alpha,
-        fair=args.fair,
-        which_position=args.which_position)
-
+        print("\nTraining Client: ", i+1, fair, alpha)
+        train(device=device, steps=num_steps, lr=lr, wd=wd, alpha=alpha, fair=fair, which_position=which_position, num_features=num_features, train_loader=nodes.train_loaders[i], test_loader=nodes.test_loaders[i], client_num=i+1)
 
 if __name__ == "__main__":
     main()
