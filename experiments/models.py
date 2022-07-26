@@ -1,8 +1,6 @@
 from collections import OrderedDict
 import torch
 from torch import nn
-import numpy as np
-
 
 class LRHyper(nn.Module):
     def __init__(self, device, n_nodes, embedding_dim, context_vector_size, hidden_size, hnet_hidden_dim=100,
@@ -166,6 +164,19 @@ class Constraint(torch.nn.Module):
         loss = torch.matmul(self.lmbda.T, value)
 
         return loss
+
+class Plain_LR(torch.nn.Module):
+    def __init__(self, input_size):
+        super(Plain_LR, self).__init__()
+
+        self.input_size = input_size
+        self.fc1 = nn.Linear(self.input_size, 1)
+
+    def forward(self, x):
+        prediction = torch.sigmoid(self.fc1(x))
+
+        return prediction
+
 
 
 

@@ -4,29 +4,27 @@ import argparse
 import logging
 import random
 import warnings
-import copy
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 import numpy as np
 import torch
-import copy
 import pandas as pd
 import torch.utils.data
 from tqdm import trange
-from experiments.new.pFedHN.pFedHN_models import LR, Constraint
-from experiments.new.pFedHN.node import BaseNodes
-from experiments.new.pFedHN.utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
+from experiments.models import LR, Constraint
+from experiments.node import BaseNodes
+from experiments.utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
 from torch.utils.tensorboard import SummaryWriter
 warnings.filterwarnings("ignore")
 
 def eval_model(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, confusion, which_position):
-    curr_results, preds, true, a, f_a, m_a, eod, spd = evaluate(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, which_position)
+    curr_results, preds, true, a, eod, spd = evaluate(nodes, num_nodes, hnet, model, cnet, num_features, loss, device, fair, constraint, alpha, which_position)
     total_correct = sum([val['correct'] for val in curr_results.values()])
     total_samples = sum([val['total'] for val in curr_results.values()])
     avg_acc = total_correct / total_samples
 
     all_acc = [val['correct'] / val['total'] for val in curr_results.values()]
 
-    return curr_results, avg_acc, all_acc, f_a, m_a, eod, spd
+    return curr_results, avg_acc, all_acc,  eod, spd
 
 @torch.no_grad()
 def evaluate(nodes, num_nodes, global_model, models, cnets, num_features, loss, device, fair, constraints, alpha, which_position):
@@ -66,11 +64,9 @@ def evaluate(nodes, num_nodes, global_model, models, cnets, num_features, loss, 
 
         tp, fp, tn, fn = TP_FP_TN_FN(queries_client, pred_client, true_client, which_position)
 
-        accuracy, f_acc, m_acc, EOD, SPD = metrics(tp, fp, tn, fn)
+        accuracy, EOD, SPD = metrics(tp, fp, tn, fn)
 
         a.append(accuracy)
-        f_a.append(f_acc)
-        m_a.append(m_acc)
         eod.append(EOD)
         spd.append(SPD)
         results[node_id]['correct'] = running_correct
@@ -78,7 +74,7 @@ def evaluate(nodes, num_nodes, global_model, models, cnets, num_features, loss, 
         preds.append(pred_client)
         true.append(true_client)
 
-    return results, preds, true, a, f_a, m_a, eod, spd
+    return results, preds, true, a, eod, spd
 
 def train(save_file_name, device, data_name,model_name,classes_per_node,num_nodes,steps,inner_steps,lr,inner_lr,wd,inner_wd, hyper_hid,n_hidden,bs, alpha,fair, which_position):
     b = 1/alpha[0]
@@ -95,7 +91,7 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
     for i in range(1):
         seed_everything(0)
 
-        nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node)
+        nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node, fairfed=False)
         num_features = len(nodes.features)
 
         total_data_length = 0
@@ -123,7 +119,7 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
                     alphas.append(alpha[1])
         elif fair == 'none':
             client_fairness = ['none' for i in range(num_nodes)]
-            alphas = ['none' for i in range(num_nodes)]
+            alphas = [1 for i in range(num_nodes)]
 
         # Set models for all clients
         for i in range(num_nodes):
@@ -146,7 +142,7 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
             sampled = []
             choices = [0, 1, 2, 3]
 
-            sample_precentage = random.choice([1,2,3,4])
+            sample_precentage = random.choice([4])
             for j in range(sample_precentage):
                 node_id = random.choice(choices)
                 sampled.append(node_id)
@@ -228,7 +224,7 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
             global_model.fc1.weight.data = new_weights.data.clone()
             global_model.fc1.bias.data = new_biases.data.clone()
 
-        step_results, avg_acc_all, all_acc, f_a, m_a, eod, spd = eval_model(
+        step_results, avg_acc_all, all_acc,  eod, spd = eval_model(
             nodes, num_nodes, global_model, models, None, num_features, loss, device, confusion=False, fair=fair,
             constraint=constraints, alpha=alpha, which_position=which_position)
 
@@ -254,8 +250,8 @@ def main():
     # file = open("/home/ancarey/FairFLHN/experiments/new/FedAvg/all-runs.txt", "w")
     # file.close()
 
-    names = ['compas']#, 'compas']
-    fair = ['eo']#['dp', 'eo', 'both']
+    names = ['adult']#, 'compas']
+    fair = ['none']#['dp', 'eo', 'both']
 
     for i, n in enumerate(names):
         for j, f in enumerate(fair):

@@ -7,8 +7,80 @@ import pandas as pd
 from collections import OrderedDict
 from sklearn.model_selection import train_test_split
 import numpy as np
-from collections import defaultdict
-from torch.utils.data.sampler import SubsetRandomSampler
+
+def entire_dist_statistics(dataset, dataset_name, client):
+
+    g0 = 0
+    g1 = 0
+    g0_1 = 0
+    g1_1 = 0
+
+    if client == True:
+        if dataset_name == 'adult':
+            for i in range(len(dataset[0])):
+                if dataset[0][i][8] == 0:
+                    g0 += 1
+                    if dataset[1][i] == 1:
+                        g0_1 += 1
+                elif dataset[0][i][8] == 1:
+                    g1 += 1
+                    if dataset[1][i] == 1:
+                        g1_1 += 1
+
+        if dataset_name == 'compas':
+            for i in range(len(dataset[0])):
+                if dataset[0][i][5] == 0:
+                    g0 += 1
+                    if dataset[1][i] == 1:
+                        g0_1 += 1
+                if dataset[0][i][5] == 1:
+                    g1 += 1
+                    if dataset[1][i] == 1:
+                        g1_1 += 1
+
+        total_size = len(dataset[0])
+
+    elif client == False:
+
+        if dataset_name == 'adult':
+            for i in range(len(dataset)):
+                if dataset.iloc[i]['workclass'] == 0:
+                    g0 += 1
+                    if dataset.iloc[i]['income_class'] == 1:
+                        g0_1 += 1
+                elif dataset.iloc[i]['workclass'] == 1:
+                    g1 += 1
+                    if dataset.iloc[i]['income_class'] == 1:
+                        g1_1 += 1
+
+        if dataset_name == 'compas':
+            for i in range(len(dataset)):
+                if dataset.iloc[i]['sex'] == 0:
+                    g0 += 1
+                    if dataset.iloc[i]['two_year_recid'] == 1:
+                        g0_1 += 1
+                if dataset.iloc[i]['sex'] == 1:
+                    g1 += 1
+                    if dataset.iloc[i]['two_year_recid'] == 1:
+                        g1_1 += 1
+
+        total_size = len(dataset)
+
+    prob_a0 = g0 / total_size
+    prob_a1 = g1 / total_size
+
+    if prob_a0 == 0:
+        prob_y1_given_a0 = 0
+    else:
+        prob_y1_given_a0 = (g0_1/total_size) / prob_a0  # p(y = 1 and a = 0) / p(a = 0)
+    if prob_a1 == 0:
+        prob_y1_given_a1 = 0
+    else:
+        prob_y1_given_a1 = (g1_1/total_size)/ prob_a1  # p(y = 1 and a = 1) / p(a = 1)
+
+    statistics = [prob_a0, prob_a1, prob_y1_given_a0, prob_y1_given_a1, total_size]
+
+    return statistics
 
 class TabularData(Dataset):
     def __init__(self, X, y):
@@ -81,12 +153,11 @@ def clean_and_encode_dataset(data, data_name):
         data = data.loc[data['is_recid'] != -1]
         data = data.loc[data['c_charge_degree'] != "O"]
         data = data.loc[data['score_text'] != 'N/A']
-        #data['race'].loc[data['race'] != "Caucasian"] = 'Other'
+        #data.replace(['African-American', 'Hispanic', 'Asian', 'Other', 'Native American'], ['POC', 'POC', 'POC', 'POC', 'POC'], inplace=True)
         data['is_med_or_high_risk'] = (data['decile_score'] >= 5).astype(int)
         data['length_of_stay'] = (
                 pd.to_datetime(data['c_jail_out']) - pd.to_datetime(data['c_jail_in']))
 
-        #cols = ['age', 'c_charge_degree', 'sex', 'age_cat', 'score_text', 'race', 'priors_count', 'length_of_stay', 'days_b_screening_arrest', 'decile_score', 'two_year_recid']
         cols = ['age', 'c_charge_degree', 'race', 'age_cat', 'score_text', 'sex', 'priors_count', 'length_of_stay', 'days_b_screening_arrest', 'decile_score', 'two_year_recid']
 
         data = data[cols]
@@ -100,9 +171,13 @@ def clean_and_encode_dataset(data, data_name):
             encoders[col] = LabelEncoder().fit(data[col])
             data.loc[:, col] = encoders[col].transform(data[col])
 
+
+
     return data
 
-def get_dataset(data_name, num_clients):
+def get_dataset(data_name, fairfed):
+    stats = None
+
     if data_name == 'adult':
 
         CURRENT_DIR = os.path.abspath(os.path.dirname(__name__))
@@ -131,13 +206,16 @@ def get_dataset(data_name, num_clients):
         test_data = clean_and_encode_dataset(read_dataset(TEST_DATA_FILE, data_types, 'adult'), 'adult')    #(16281, 14)
         train_data = train_data.sort_values('workclass').reset_index(drop=True)
         test_data = test_data.sort_values('workclass').reset_index(drop=True)
-        splits = [train_data.index[np.searchsorted(train_data['workclass'], 1)],test_data.index[np.searchsorted(test_data['workclass'], 1)]]
+        splits = [train_data.index[np.searchsorted(train_data['workclass'], .5, side='right')],test_data.index[np.searchsorted(test_data['workclass'], .5, side='right')+1]]
         datasets = [train_data, test_data]
 
         cols = train_data.columns
         features, labels = cols[:-1], cols[-1]
 
-        return datasets, splits, features, labels
+        if fairfed:
+            stats = entire_dist_statistics(train_data, 'adult', client=False)
+
+        return datasets, splits, features, labels, stats
 
     elif data_name == 'compas':
         data = clean_and_encode_dataset(read_dataset(None, None, 'compas'), 'compas')
@@ -146,20 +224,24 @@ def get_dataset(data_name, num_clients):
         test_data = test_data.sort_values('age').reset_index(drop=True)
         splits = [train_data.index[np.searchsorted(train_data['age'], 31, side='left')],
                   test_data.index[np.searchsorted(test_data['age'], 31, side='left')]]
+
+        if fairfed:
+            stats = entire_dist_statistics(train_data, 'compas', client=False)
+
         datasets = [train_data, test_data]
 
         cols = train_data.columns
         features, labels = cols[:-1], cols[-1]
 
-    return datasets, splits, features, labels
+    return datasets, splits, features, labels, stats
 
-def gen_random_loaders(data_name, num_clients, bz):
-    loader_params = {"batch_size": bz, "shuffle": False, "pin_memory": True, "num_workers": 0}
+def gen_random_loaders(data_name, num_clients, bz, fairfed):
+    loader_params = {"batch_size": bz, "shuffle": True, "pin_memory": True, "num_workers": 0}
 
     dataloaders = []
+    individual_stats = []
 
-    datasets, splits, features, labels = get_dataset(data_name, num_clients)
-
+    datasets, splits, features, labels, stats = get_dataset(data_name, fairfed)
     all_client_test_train = [[], []]
 
     first_set = random.randint(1,num_clients-1)
@@ -173,7 +255,7 @@ def gen_random_loaders(data_name, num_clients, bz):
 
         for i in range(num_clients):
             if i < first_set:
-                amount = int((splits[j] - 1) / first_set)
+                amount = int((splits[j]) / first_set)
             else:
                 amount = amount_two
 
@@ -181,19 +263,23 @@ def gen_random_loaders(data_name, num_clients, bz):
             if i == num_clients - 1:
                 client_data = data_copy
             else:
-                client_data = data_copy[0:amount]
+                client_data = data_copy[0:amount+1]
 
+            if j == 0:
+                individual_stats.append( entire_dist_statistics([client_data[features].values, client_data[labels].values], data_name, client=True))
 
             all_client_test_train[j].append(TabularData(client_data[features].values, client_data[labels].values))
-            data_copy = data_copy[amount:]
+
+            data_copy = data_copy[amount+1:]
 
         subsets = all_client_test_train[j]
         if j == 0:
             loader_params['shuffle'] = True
         else:
             loader_params['shuffle'] = False
+
         dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params), subsets)))
 
-    return dataloaders, features
+    return dataloaders, features, stats, individual_stats
 
 

@@ -10,7 +10,7 @@ import torch
 import pandas as pd
 import torch.utils.data
 from tqdm import trange
-from pFedHN_models import LRHyper, LR, Constraint
+from models import LRHyper, LR, Constraint
 from node import BaseNodes
 from utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
 warnings.filterwarnings("ignore")
@@ -97,7 +97,7 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
     for i in range(1):
         seed_everything(0)
 
-        nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node)
+        nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node, fairfed=False)
         num_features = len(nodes.features)
         embed_dim = num_features
         mu_size = 0

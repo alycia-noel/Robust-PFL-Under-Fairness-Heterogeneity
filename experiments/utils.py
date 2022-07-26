@@ -57,10 +57,7 @@ def TP_FP_TN_FN(x, predicted_prediction, labels_pred, which_position):
 def metrics(TP, FP, TN, FN):
 
     accuracy = (TP[0] + TN[0]) / (TP[0] + FP[0] + FN[0] + TN[0])
-    f_acc = (TP[1] + TN[1]) / (TP[1] + FP[1] + FN[1] + TN[1])
-    m_acc = (TP[2] + TN[2]) / (TP[2] + FP[2] + FN[2] + TN[2])
-
-    eod = (TP[1] / (TP[1] + FN[1])) - (TP[2] / (TP[2] + FN[2]))                                                                     # equal opportunity difference
+    eod = (TP[1] / (TP[1] + FN[1])) - (TP[2] / (TP[2] + FN[2]))
     spd = (TP[1] + FP[1]) / (TP[1] + FP[1] + TN[1] + FN[1]) - (TP[2] + FP[2]) / (TP[2] + FP[2] + TN[2] + FN[2])
 
-    return accuracy, f_acc, m_acc, eod, spd
+    return accuracy, eod, spd

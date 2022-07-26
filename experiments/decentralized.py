@@ -4,9 +4,9 @@ import warnings
 import torch
 import torch.utils.data
 from tqdm import trange
-from experiments.new.pFedHN.utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
-from experiments.new.pFedHN.pFedHN_models import LR, Constraint
-from experiments.new.pFedHN.node import BaseNodes
+from experiments.utils import seed_everything, TP_FP_TN_FN, metrics
+from experiments.models import LR, Constraint
+from experiments.node import BaseNodes
 warnings.filterwarnings("ignore")
 
 @torch.no_grad()
@@ -37,6 +37,7 @@ def evaluate(model, device, which_position, test_loader):
         running_samples += len(y)
 
     tp, fp, tn, fn = TP_FP_TN_FN(queries, preds, true, which_position)
+    print(tp, fp, tn, fn)
     accuracy, f_acc, m_acc, eod, spd = metrics(tp, fp, tn, fn)
 
     return accuracy, eod, spd
@@ -109,8 +110,8 @@ def main():
 
     alpha = 1
     num_nodes = 4
-    fairness = 'dp'
-    data_name = 'compas'
+    fairness = 'both'
+    data_name = 'adult'
     classes_per_node = 2
     device = 'cuda:5'
     num_steps = 5000
@@ -128,7 +129,7 @@ def main():
         alphas = [.01, .01]
         which_position = 8
 
-    nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node)
+    nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node, fairfed=False)
     num_features = len(nodes.features)
 
     for i in range(num_nodes):
