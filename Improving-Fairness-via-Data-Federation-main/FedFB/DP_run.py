@@ -26,7 +26,7 @@ def run_dp(method, model, dataset, prn = True, seed = 123, trial = False, **kwar
     if not trial: return {'accuracy': acc, 'DP Disp': dpdisp}
 
 def main():
-    run_dp('fedavg', 'logistic regression', 'adult', prn=True, seed=123, trial=False)
+    run_dp('fedfb', 'logistic regression', 'adult', prn=True, seed=123, trial=False)
 
 if __name__ == "__main__":
     main()
