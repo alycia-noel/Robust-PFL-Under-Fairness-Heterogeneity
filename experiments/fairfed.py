@@ -216,7 +216,7 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, in
 
 def main():
 
-    names = ['adult']
+    names = ['compas']
     fair = ['none']
 
     for i, n in enumerate(names):
