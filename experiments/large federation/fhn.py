@@ -214,29 +214,29 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
 
             optimizer.step()
 
-            if (round + 1) % 100 == 0 and round != 4999:
-
-                step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=nodes, num_nodes=num_nodes, hnet=hnet,
-                                                                          model=models, device=device,
-                                                                          which_position=which_position)
-
-                c_acc_p_epoch.append(all_acc)
-                acc_p_epoch.append(avg_acc_all)
-
-                spd_clients = []
-                eod_clients = []
-
-                for i in range(len(spd)):
-                    if i % 2 == 0:
-                        spd_clients.append(spd[i])
-                    elif i % 2 == 1:
-                        eod_clients.append(eod[i])
-
-                c_spd_p_epoch.append(spd_clients)
-                spd_p_epoch.append(np.mean(spd_clients))
-
-                c_eod_p_epoch.append(eod_clients)
-                eod_p_epoch.append(np.mean(eod_clients))
+            # if (round + 1) % 100 == 0 and round != 4999:
+            #
+            #     step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=nodes, num_nodes=num_nodes, hnet=hnet,
+            #                                                               model=models, device=device,
+            #                                                               which_position=which_position)
+            #
+            #     c_acc_p_epoch.append(all_acc)
+            #     acc_p_epoch.append(avg_acc_all)
+            #
+            #     spd_clients = []
+            #     eod_clients = []
+            #
+            #     for i in range(len(spd)):
+            #         if i % 2 == 0:
+            #             spd_clients.append(spd[i])
+            #         elif i % 2 == 1:
+            #             eod_clients.append(eod[i])
+            #
+            #     c_spd_p_epoch.append(spd_clients)
+            #     spd_p_epoch.append(np.mean(spd_clients))
+            #
+            #     c_eod_p_epoch.append(eod_clients)
+            #     eod_p_epoch.append(np.mean(eod_clients))
 
         step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=nodes, num_nodes=num_nodes, hnet=hnet, model=models, device=device, which_position=which_position)
 
@@ -324,7 +324,7 @@ def main():
     parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
     parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
-    parser.add_argument("--num_nodes", type=int, default=90, help="number of simulated clients")
+    parser.add_argument("--num_nodes", type=int, default=70, help="number of simulated clients")
     parser.add_argument("--num_steps", type=int, default=5000)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")

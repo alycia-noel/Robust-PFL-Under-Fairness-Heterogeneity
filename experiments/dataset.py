@@ -181,8 +181,8 @@ def get_dataset(data_name, fairfed):
     if data_name == 'adult':
 
         CURRENT_DIR = os.path.abspath(os.path.dirname(__name__))
-        TRAIN_DATA_FILE = os.path.join(CURRENT_DIR, 'adult.data')
-        TEST_DATA_FILE = os.path.join(CURRENT_DIR, 'adult.test')
+        TRAIN_DATA_FILE = os.path.join(CURRENT_DIR, '../Improving-Fairness-via-Data-Federation-main/FedFB/adult.data')
+        TEST_DATA_FILE = os.path.join(CURRENT_DIR, '../Improving-Fairness-via-Data-Federation-main/FedFB/adult.test')
 
         data_types = OrderedDict([
             ("age", "int"),
