@@ -285,7 +285,7 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
         print("\nClient", i+1)
         print(f"Acc: {all_acc[i]:.4f}, EOD: {eod[i]:.4f}, SPD: {spd[i]:.4f}")
 
-    sns.set(font_scale=1.25)
+    sns.set(font_scale=1.5)
 
     maxes_acc = []
     mins_acc = []
