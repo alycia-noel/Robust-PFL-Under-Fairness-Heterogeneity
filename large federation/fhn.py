@@ -144,6 +144,28 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
         step_iter = trange(steps)
 
         for round in step_iter:
+            if round == 0:
+                step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=nodes, num_nodes=num_nodes, hnet=hnet,
+                                                                          model=models, device=device,
+                                                                          which_position=which_position)
+
+                c_acc_p_epoch.append(all_acc)
+                acc_p_epoch.append(avg_acc_all)
+
+                spd_clients = []
+                eod_clients = []
+
+                for i in range(len(spd)):
+                    if i % 2 == 0:
+                        spd_clients.append(spd[i])
+                    elif i % 2 == 1:
+                        eod_clients.append(eod[i])
+
+                c_spd_p_epoch.append(spd_clients)
+                spd_p_epoch.append(np.mean(spd_clients))
+
+                c_eod_p_epoch.append(eod_clients)
+                eod_p_epoch.append(np.mean(eod_clients))
             hnet.train()
             node_id = random.choice(range(num_nodes))
 
@@ -214,109 +236,144 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
 
             optimizer.step()
 
-            # if (round + 1) % 100 == 0 and round != 4999:
-            #
-            #     step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=nodes, num_nodes=num_nodes, hnet=hnet,
-            #                                                               model=models, device=device,
-            #                                                               which_position=which_position)
-            #
-            #     c_acc_p_epoch.append(all_acc)
-            #     acc_p_epoch.append(avg_acc_all)
-            #
-            #     spd_clients = []
-            #     eod_clients = []
-            #
-            #     for i in range(len(spd)):
-            #         if i % 2 == 0:
-            #             spd_clients.append(spd[i])
-            #         elif i % 2 == 1:
-            #             eod_clients.append(eod[i])
-            #
-            #     c_spd_p_epoch.append(spd_clients)
-            #     spd_p_epoch.append(np.mean(spd_clients))
-            #
-            #     c_eod_p_epoch.append(eod_clients)
-            #     eod_p_epoch.append(np.mean(eod_clients))
+            if (round + 1) % 100 == 0 and round != 0:
+                print(round)
+                step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=nodes, num_nodes=num_nodes, hnet=hnet,
+                                                                          model=models, device=device,
+                                                                          which_position=which_position)
 
-        step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=nodes, num_nodes=num_nodes, hnet=hnet, model=models, device=device, which_position=which_position)
+                c_acc_p_epoch.append(all_acc)
+                acc_p_epoch.append(avg_acc_all)
 
-        c_acc_p_epoch.append(all_acc)
-        acc_p_epoch.append(avg_acc_all)
+                spd_clients = []
+                eod_clients = []
 
-        spd_clients = []
-        eod_clients = []
+                for i in range(len(spd)):
+                    if i % 2 == 0:
+                        spd_clients.append(spd[i])
+                    elif i % 2 == 1:
+                        eod_clients.append(eod[i])
 
-        for i in range(len(spd)):
-            if i % 2 == 0:
-                spd_clients.append(spd[i])
-            elif i % 2 == 1:
-                eod_clients.append(eod[i])
+                c_spd_p_epoch.append(spd_clients)
+                spd_p_epoch.append(np.mean(spd_clients))
 
-        c_spd_p_epoch.append(spd_clients)
-        spd_p_epoch.append(np.mean(spd_clients))
+                c_eod_p_epoch.append(eod_clients)
+                eod_p_epoch.append(np.mean(eod_clients))
 
-        c_eod_p_epoch.append(eod_clients)
-        eod_p_epoch.append(np.mean(eod_clients))
+        # step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=nodes, num_nodes=num_nodes, hnet=hnet, model=models, device=device, which_position=which_position)
+        #
+        # c_acc_p_epoch.append(all_acc)
+        # acc_p_epoch.append(avg_acc_all)
+        #
+        # spd_clients = []
+        # eod_clients = []
+        #
+        # for i in range(len(spd)):
+        #     if i % 2 == 0:
+        #         spd_clients.append(spd[i])
+        #     elif i % 2 == 1:
+        #         eod_clients.append(eod[i])
+        #
+        # c_spd_p_epoch.append(spd_clients)
+        # spd_p_epoch.append(np.mean(spd_clients))
+        #
+        # c_eod_p_epoch.append(eod_clients)
+        # eod_p_epoch.append(np.mean(eod_clients))
 
     print(f"\n\nFinal Results | AVG Acc: {np.mean(avg_acc_all):.4f} | AVG EOD: {np.mean(eod_p_epoch[-1]):.4f} | AVG SPD: {np.mean(spd_p_epoch[-1]):.4f}")
     for i in range(num_nodes):
         print("\nClient", i+1)
         print(f"Acc: {all_acc[i]:.4f}, EOD: {eod[i]:.4f}, SPD: {spd[i]:.4f}")
 
-    # sns.set()
-    # maxes_acc = []
-    # mins_acc = []
-    #
-    # maxes_eod = []
-    # mins_eod = []
-    #
-    # maxes_spd = []
-    # mins_spd = []
-    #
-    #
-    # mean_1 = acc_p_epoch
-    # mean_2 = eod_p_epoch
-    # mean_3 = spd_p_epoch
-    #
-    # x = np.arange(0, 5000, step=100)
-    #
-    # for i in range(len(c_acc_p_epoch)):
-    #     maxes_acc.append(max(c_acc_p_epoch[i]))
-    #     mins_acc.append(min(c_acc_p_epoch[i]))
-    #
-    #     maxes_eod.append(max(c_eod_p_epoch[i]))
-    #     mins_eod.append(min(c_eod_p_epoch[i]))
-    #
-    #     maxes_spd.append(max(c_spd_p_epoch[i]))
-    #     mins_spd.append(min(c_spd_p_epoch[i]))
+    sns.set(font_scale=1.25)
+
+    maxes_acc = []
+    mins_acc = []
+    std_acc = []
+
+    maxes_eod = []
+    mins_eod = []
+    std_eod = []
+
+    maxes_spd = []
+    mins_spd = []
+    std_spd = []
+
+    mean_1 = acc_p_epoch
+    mean_2 = eod_p_epoch
+    mean_3 = spd_p_epoch
+
+    x = np.arange(0, 600, step=100)
+    print(x)
+    for i in range(len(c_acc_p_epoch)):
+        maxes_acc.append(max(c_acc_p_epoch[i]))
+        mins_acc.append(min(c_acc_p_epoch[i]))
+        std_acc.append(np.std(c_acc_p_epoch[i]))
+
+        maxes_eod.append(max(c_eod_p_epoch[i]))
+        mins_eod.append(min(c_eod_p_epoch[i]))
+        std_eod.append(np.std(c_eod_p_epoch[i]))
+
+        maxes_spd.append(max(c_spd_p_epoch[i]))
+        mins_spd.append(min(c_spd_p_epoch[i]))
+        std_spd.append(np.std(c_spd_p_epoch[i]))
 
 
-    # plt.plot(x, mean_1, 'b-')
-    # plt.fill_between(x, mins_acc, maxes_acc, color='b', alpha=0.2)
-    # #plt.legend(title='Num Clients')
-    # plt.title('Accuracy per Round for ' + str(num_nodes) + ' Clients')
-    # plt.xlabel('Round')
-    # plt.ylabel('Accuracy')
-    # plt.tight_layout()
-    # plt.show()
-    #
-    # plt.plot(x, mean_2, 'r-')
-    # plt.fill_between(x, mins_eod, maxes_eod, color='r', alpha=0.2)
-    # #plt.legend(title='Num Clients')
-    # plt.title('EOD per Round for ' + str(num_nodes) + ' Clients')
-    # plt.xlabel('Round')
-    # plt.ylabel('EOD')
-    # plt.tight_layout()
-    # plt.show()
-    #
-    # plt.plot(x, mean_3, 'g-')
-    # plt.fill_between(x, mins_spd, maxes_spd, color='g', alpha=0.2)
-    # #plt.legend(title='Num Clients')
-    # plt.title('SPD per Rounds for ' + str(num_nodes) + ' Clients')
-    # plt.xlabel('Round')
-    # plt.ylabel('SPD')
-    # plt.tight_layout()
-    # plt.show()
+    print(std_acc)
+    print(mean_1)
+    plt.plot(x, mean_1, 'b-', linewidth=2)
+    plt.plot(x, mins_acc, linestyle='dotted', linewidth=1.5, color='black')
+    plt.plot(x, maxes_acc, linestyle='dotted', linewidth=1.5, color='black')
+    plt.fill_between(x, np.subtract(mean_1,std_acc), np.add(mean_1,std_acc), color='b', alpha=0.2)
+    plt.xlabel('Round')
+    plt.ylabel('Accuracy')
+    plt.ylim([0, 1])
+    plt.tight_layout()
+    plt.show()
+
+    plt.plot(x, mean_2, 'r-')
+    plt.plot(x, mins_eod, linestyle='dotted', linewidth=1.5, color='black')
+    plt.plot(x, maxes_eod, linestyle='dotted', linewidth=1.5, color='black')
+    plt.fill_between(x, np.subtract(mean_2, std_eod), np.add(mean_2, std_eod), color='r', alpha=0.2)
+    plt.xlabel('Round')
+    plt.ylabel('EOD')
+    plt.ylim([-.5, .5])
+    plt.tight_layout()
+    plt.show()
+
+    plt.plot(x, mean_3, 'g-')
+    plt.plot(x, mins_spd, linestyle='dotted', linewidth=1.5, color='black')
+    plt.plot(x, maxes_spd, linestyle='dotted', linewidth=1.5, color='black')
+    plt.fill_between(x, np.subtract(mean_3, std_spd), np.add(mean_3, std_spd), color='g', alpha=0.2)
+    plt.xlabel('Round')
+    plt.ylabel('SPD')
+    plt.ylim([-.5, .5])
+    plt.tight_layout()
+    plt.show()
+
+    plt.plot(x, mean_1, 'b-', linewidth=2)
+    plt.fill_between(x, np.subtract(mean_1, std_acc), np.add(mean_1, std_acc), color='b', alpha=0.2)
+    plt.xlabel('Round')
+    plt.ylabel('Accuracy')
+    plt.ylim([0, 1])
+    plt.tight_layout()
+    plt.show()
+
+    plt.plot(x, mean_2, 'r-')
+    plt.fill_between(x, np.subtract(mean_2, std_eod), np.add(mean_2, std_eod), color='r', alpha=0.2)
+    plt.xlabel('Round')
+    plt.ylabel('EOD')
+    plt.ylim([-.5, .5])
+    plt.tight_layout()
+    plt.show()
+
+    plt.plot(x, mean_3, 'g-')
+    plt.fill_between(x, np.subtract(mean_3, std_spd), np.add(mean_3, std_spd), color='g', alpha=0.2)
+    plt.xlabel('Round')
+    plt.ylabel('SPD')
+    plt.ylim([-.5, .5])
+    plt.tight_layout()
+    plt.show()
 
 def main():
     pd.set_option('display.float_format', lambda x: '%.1f' % x)
@@ -324,8 +381,8 @@ def main():
     parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
     parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
-    parser.add_argument("--num_nodes", type=int, default=70, help="number of simulated clients")
-    parser.add_argument("--num_steps", type=int, default=5000)
+    parser.add_argument("--num_nodes", type=int, default=10, help="number of simulated clients")
+    parser.add_argument("--num_steps", type=int, default=500)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
     parser.add_argument("--n_hidden", type=int, default=4, help="num. hidden layers")

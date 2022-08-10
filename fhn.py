@@ -205,7 +205,14 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
             optimizer.zero_grad()
             final_state = model.state_dict()
             delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
+            print(delta_theta)
             hnet_grads = torch.autograd.grad(list(weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values()))
+
+            for names, param in enumerate(hnet.named_parameters()):
+                print(names)
+                print(param)
+            exit(1)
+
             for p, g in zip(hnet.parameters(), hnet_grads):
                 p.grad = g
 
