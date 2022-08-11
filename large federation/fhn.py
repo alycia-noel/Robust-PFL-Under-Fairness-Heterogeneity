@@ -237,7 +237,6 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
             optimizer.step()
 
             if (round + 1) % 100 == 0 and round != 0:
-                print(round)
                 step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=nodes, num_nodes=num_nodes, hnet=hnet,
                                                                           model=models, device=device,
                                                                           which_position=which_position)
@@ -303,7 +302,7 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
     mean_2 = eod_p_epoch
     mean_3 = spd_p_epoch
 
-    x = np.arange(0, 600, step=100)
+    x = np.arange(0, 5100, step=100)
     print(x)
     for i in range(len(c_acc_p_epoch)):
         maxes_acc.append(max(c_acc_p_epoch[i]))
@@ -319,8 +318,6 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
         std_spd.append(np.std(c_spd_p_epoch[i]))
 
 
-    print(std_acc)
-    print(mean_1)
     plt.plot(x, mean_1, 'b-', linewidth=2)
     plt.plot(x, mins_acc, linestyle='dotted', linewidth=1.5, color='black')
     plt.plot(x, maxes_acc, linestyle='dotted', linewidth=1.5, color='black')
@@ -381,10 +378,10 @@ def main():
     parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
     parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
-    parser.add_argument("--num_nodes", type=int, default=10, help="number of simulated clients")
-    parser.add_argument("--num_steps", type=int, default=500)
+    parser.add_argument("--num_nodes", type=int, default=50, help="number of simulated clients")
+    parser.add_argument("--num_steps", type=int, default=5000)
     parser.add_argument("--batch_size", type=int, default=256)
-    parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
+    parser.add_argument("--inner_steps", type=int, default=70, help="number of inner steps")
     parser.add_argument("--n_hidden", type=int, default=4, help="num. hidden layers")
     parser.add_argument("--inner_lr", type=float, default=.001, help="learning rate for inner optimizer")
     parser.add_argument("--lr", type=float, default=1e-5, help="learning rate")
