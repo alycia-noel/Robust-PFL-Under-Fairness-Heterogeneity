@@ -5,8 +5,12 @@ import torch.utils.data
 from sklearn.preprocessing import LabelEncoder
 import pandas as pd
 from collections import OrderedDict
+from scipy.special import rel_entr
+from scipy.stats import wasserstein_distance
 from sklearn.model_selection import train_test_split
 import numpy as np
+from scipy.spatial import KDTree
+import matplotlib.pyplot as plt
 
 class TabularData(Dataset):
     def __init__(self, X, y):
@@ -24,7 +28,19 @@ class TabularData(Dataset):
 
         return self.X[idx], self.y[idx]
 
+def TotalVariation(training, novel, z, o):
 
+    training_tree = KDTree(training)
+
+    all_nn_indicies = training_tree.query(novel, k=1, eps=.01, p=2)[1].tolist()
+    all_nns = [training[idx] for idx in all_nn_indicies]
+
+    abs_difference_zero = [abs(n[0] - t[0]) for n, t in zip(novel, all_nns)]
+    abs_difference_one = [abs(n[0] - t[0]) for n, t in zip(novel, all_nns)]
+
+    tv = [(abs_z + abs_o)/2 for abs_z, abs_o in zip(abs_difference_zero, abs_difference_one)]
+
+    return(np.average(tv))
 
 def read_dataset(path, data_types, data_name):
 
@@ -99,9 +115,7 @@ def get_dataset(data_name):
 
     train_data = clean_and_encode_dataset(read_dataset(TRAIN_DATA_FILE, data_types, 'adult'), 'adult')  #(32561, 14)
     test_data = clean_and_encode_dataset(read_dataset(TEST_DATA_FILE, data_types, 'adult'), 'adult')    #(16281, 14)
-    #train_data = train_data.sort_values('workclass').reset_index(drop=True)
-    #test_data = test_data.sort_values('workclass').reset_index(drop=True)
-    #splits = [train_data.index[np.searchsorted(train_data['workclass'], .5, side='right')],test_data.index[np.searchsorted(test_data['workclass'], .5, side='right')+1]]
+
     datasets = [train_data, test_data]
 
     cols = train_data.columns
@@ -109,26 +123,58 @@ def get_dataset(data_name):
 
     return datasets, features, labels
 
-def gen_random_loaders(data_name, num_clients, bz):
+def gen_random_loaders(data_name, num_clients, bz, r):
     loader_params = {"batch_size": bz, "shuffle": True, "pin_memory": True, "num_workers": 0}
 
     dataloaders = []
+    total_variation = []
 
     datasets, features, labels = get_dataset(data_name)
     all_client_test_train = [[], []]
 
     for j, data_copy in enumerate(datasets):
+        num_classes = 2
 
-        if j == 0:
-            min = 500
-        else:
-            min = 200
+        label_distribution = np.random.dirichlet([1,1], 90) #(2, 90)
 
-        amounts = [random.randint(min, int((len(data_copy)/2))) for i in range(num_clients)]
+        zero_distribution = label_distribution[:, 0]
+        one_distribution = label_distribution[:, 1]
+
+        proportions_novel = np.random.dirichlet([1, r], 10)
+        zero_distribution = np.append(zero_distribution, proportions_novel[:,0])
+        one_distribution = np.append(one_distribution, proportions_novel[:,1])
+
+        # normalize so sum_i p_i,j = 1 for all classes j
+        zero_distribution = [float(i)/sum(zero_distribution) for i in zero_distribution]
+        one_distribution = [float(i)/sum(one_distribution) for i in one_distribution]
+
+        novel_clients = [90, 91, 92, 93, 94, 95, 96, 97, 98, 99]
+
+        #for i, client in enumerate(novel_clients):
+        P = []
+        Q = []
+
+        for i, num in enumerate(novel_clients):
+            P.append([zero_distribution[num], one_distribution[num]])
+
+        for i in range(90):
+            Q.append([zero_distribution[i], one_distribution[i]])
+
+        total_variation.append(TotalVariation(Q, P, zero_distribution, one_distribution))
+
+        class_idcs = [np.argwhere(np.array(data_copy['income_class'] == y)).flatten() for y in range(num_classes)]
+
+        proportions = [zero_distribution, one_distribution]
+        client_idcs = [[] for _ in range(num_clients)]
+
+        for c, fracs in zip(class_idcs, proportions):
+            for i, idcs in enumerate(np.split(c, (np.cumsum(fracs)[:-1]*len(c)).astype(int))):
+                client_idcs[i] += [idcs]
+
+        client_idcs = [np.concatenate(idcs) for idcs in client_idcs]
 
         for i in range(num_clients):
-            client_data = data_copy.sample(n = amounts[i], replace=True, ignore_index = False)
-
+            client_data = data_copy.iloc[client_idcs[i]]
             all_client_test_train[j].append(TabularData(client_data[features].values, client_data[labels].values))
 
         subsets = all_client_test_train[j]
@@ -138,7 +184,6 @@ def gen_random_loaders(data_name, num_clients, bz):
             loader_params['shuffle'] = False
 
         dataloaders.append(list(map(lambda x: torch.utils.data.DataLoader(x, **loader_params), subsets)))
-
-    return dataloaders, features
+    return dataloaders, features, total_variation
 
 

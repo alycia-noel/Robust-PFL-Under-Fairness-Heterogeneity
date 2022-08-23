@@ -3,7 +3,6 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 os.environ['CUDA_VISIBLE_DEVICES'] = "1, 2, 3, 4, 5, 6, 7"
 import argparse
-import logging
 import random
 import warnings
 from collections import OrderedDict, defaultdict
@@ -35,11 +34,19 @@ def evaluate(nodes, num_nodes, hnet, models, device, which_position):
     true = []
     a, eod, spd = [], [], []
 
+    node_ids = [90, 91, 92, 93, 94, 95, 96, 97, 98, 99]
+
     for node_id in range(num_nodes):
         pred_client = []
         true_client = []
         queries_client = []
-        model = models[node_id]
+
+        if num_nodes == 10:
+            node_id_current = node_ids[node_id]
+        else:
+            node_id_current = node_id
+
+        model = models[node_id_current]
         model.eval()
         model.to(device)
 
@@ -54,7 +61,7 @@ def evaluate(nodes, num_nodes, hnet, models, device, which_position):
             true_client.extend(y.cpu().numpy())
             queries_client.extend(x.cpu().numpy())
 
-            weights = hnet(torch.tensor([node_id], dtype=torch.long).to(device))
+            weights = hnet(torch.tensor([node_id_current], dtype=torch.long).to(device))
             model.load_state_dict(weights)
 
             pred, m_mu_q = model(x, s, y)
@@ -81,429 +88,424 @@ def evaluate(nodes, num_nodes, hnet, models, device, which_position):
 
 def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr, inner_lr, wd, inner_wd, hyper_hid, n_hidden, bs, alpha_all, fair, which_position):
 
-    all_acc_10 = []
-    all_spd_10 = []
-    all_eod_10 = []
+    repeated_acc = []
+    repeated_spd = []
+    repeated_eod = []
+
+    tv_f = []
+
     b = 1/alpha_all[0]
 
-    seed_everything(0)
+    ranges = [2, 4, 6, 8, 10]
+    for i,r in enumerate(ranges):
+        all_acc_10 = []
+        all_spd_10 = []
+        all_eod_10 = []
+        avg_acc_difference_all = []
+        avg_eod_difference_all = []
+        avg_spd_difference_all = []
+        TV = []
 
-    for i in range(1):
-        avg_acc = [[] for i in range(num_nodes + 1)]
-        all_eod = [[] for i in range(num_nodes)]
-        all_spd = [[] for i in range(num_nodes)]
-        all_times = [[] for i in range(10)]
-        models = [None for i in range(num_nodes)]
-        constraints = [None for i in range(num_nodes)]
-        client_fairness = []
-        client_optimizers_theta = [None for i in range(num_nodes)]
-        client_optimizers_lambda = [None for i in range(num_nodes)]
-        alphas = []
+        for n in range(1):
+            seed_everything(0)
+            print('\n\nRound', n, 'for alpha', r)
+            print('======================')
+            models = [None for i in range(num_nodes)]
+            constraints = [None for i in range(num_nodes)]
+            client_fairness = []
+            client_optimizers_theta = [None for i in range(num_nodes)]
+            client_optimizers_lambda = [None for i in range(num_nodes)]
+            alphas = []
 
-        c_acc_p_epoch = []
-        acc_p_epoch = []
+            c_acc_p_epoch = []
+            acc_p_epoch = []
 
-        c_eod_p_epoch = []
-        eod_p_epoch = []
+            c_eod_p_epoch = []
+            eod_p_epoch = []
 
-        c_spd_p_epoch = []
-        spd_p_epoch = []
+            c_spd_p_epoch = []
+            spd_p_epoch = []
 
-        nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node, fairfed=False)
-        training_nodes_train = nodes.train_loaders[0:90]
-        training_nodes_test = nodes.test_loaders[0:90]
-        novel_nodes_train = nodes.train_loaders[90:100]
-        novel_nodes_test = nodes.test_loaders[90:100]
+            nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node, False, r)
 
-        num_features = len(nodes.features)
-        embed_dim = num_features
+            training_nodes_train = nodes.train_loaders[0:90]
+            training_nodes_test = nodes.test_loaders[0:90]
 
-        if fair == 'dp':
-            client_fairness = ['dp' for i in range(num_nodes)]
-            alphas = [alpha_all[0] for i in range(num_nodes)]
-        elif fair == 'eo':
-            client_fairness = ['eo' for i in range(num_nodes)]
-            alphas = [alpha_all[1] for i in range(num_nodes)]
-        elif fair == 'both':
+            novel_nodes_train = nodes.train_loaders[90:100]
+            novel_nodes_test = nodes.test_loaders[90:100]
+
+            num_features = len(nodes.features)
+            embed_dim = num_features
+
+            if fair == 'dp':
+                client_fairness = ['dp' for i in range(num_nodes)]
+                alphas = [alpha_all[0] for i in range(num_nodes)]
+            elif fair == 'eo':
+                client_fairness = ['eo' for i in range(num_nodes)]
+                alphas = [alpha_all[1] for i in range(num_nodes)]
+            elif fair == 'both':
+                for i in range(num_nodes):
+                    if i % 2 == 0:
+                        client_fairness.append('dp')
+                        alphas.append(alpha_all[0])
+                    else:
+                        client_fairness.append('eo')
+                        alphas.append(alpha_all[1])
+            elif fair == 'none':
+                client_fairness = ['none' for i in range(num_nodes)]
+                alphas = [1 for i in range(num_nodes)]
+
+            hnet = LRHyper(device=device, n_nodes=num_nodes-10, embedding_dim=embed_dim, context_vector_size=num_features,
+                           hidden_size=num_features, hnet_hidden_dim=hyper_hid, hnet_n_hidden=n_hidden)
+
             for i in range(num_nodes):
+                models[i] = LR(input_size=num_features, bound=alphas[i], fairness=client_fairness[i])
+                constraints[i] = Constraint(bound=alphas[i], fair=client_fairness[i])
+                client_optimizers_theta[i] = torch.optim.Adam(models[i].parameters(), lr=inner_lr, weight_decay=inner_wd)
+                if fair != 'none':
+                    client_optimizers_lambda[i] = torch.optim.Adam(constraints[i].parameters(), lr=inner_lr, weight_decay=inner_wd)
+
+            hnet.to(device)
+
+            optimizer = torch.optim.Adam(params=hnet.parameters(), lr=lr, weight_decay=wd)
+            loss = torch.nn.BCELoss()
+            step_iter = trange(steps)
+
+            for round in step_iter:
+                if round == 0:
+                    step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=training_nodes_test, num_nodes=num_nodes-10, hnet=hnet,
+                                                                              model=models, device=device,
+                                                                              which_position=which_position)
+
+                    c_acc_p_epoch.append(all_acc)
+                    acc_p_epoch.append(avg_acc_all)
+
+                    spd_clients = []
+                    eod_clients = []
+
+                    for i in range(len(spd)):
+                        if i % 2 == 0:
+                            spd_clients.append(spd[i])
+                        elif i % 2 == 1:
+                            eod_clients.append(eod[i])
+
+                    c_spd_p_epoch.append(spd_clients)
+                    spd_p_epoch.append(np.mean(spd_clients))
+
+                    c_eod_p_epoch.append(eod_clients)
+                    eod_p_epoch.append(np.mean(eod_clients))
+                hnet.train()
+                node_id = random.choice(range(num_nodes-10))
+
+                model = models[node_id]
+
+                if fair != 'none':
+                    constraint = constraints[node_id]
+                    constraint.to(device)
+
+                inner_optim_theta = client_optimizers_theta[node_id]
+                inner_optim_lambda = client_optimizers_lambda[node_id]
+
+                weights = hnet(torch.tensor([node_id], dtype=torch.long).to(device))
+                model.load_state_dict(weights)
+                model.to(device)
+                inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
+                model.train()
+
+                for j in range(inner_steps):
+                    inner_optim_theta.zero_grad()
+                    if fair != 'none':
+                        inner_optim_lambda.zero_grad()
+                    optimizer.zero_grad()
+
+                    batch = next(iter(training_nodes_train[node_id]))
+                    x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
+                    s = x[:, which_position].to(device)
+
+                    pred, m_mu_q = model(x, s, y)
+                    if fair == 'none':
+                        err = loss(pred, y.unsqueeze(1))
+                    else:
+                        l = loss(pred, y.unsqueeze(1))
+                        c = constraint(m_mu_q)
+                        er = l + c
+                        err = er.mean()
+
+                    err.backward()
+                    inner_optim_theta.step()
+
+                    if fair != 'none':
+                        constraint.lmbda.data = torch.clamp(constraint.lmbda.data, min=0)
+                        torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1)
+
+                        if torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1) > b:
+                            print(torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1))
+                            print(constraint.lmbda)
+                            exit(1)
+
+                        for i, item in enumerate(constraint.lmbda.data):
+                            if item < 0:
+                                print(constraint.lmbda)
+                                exit(2)
+
+                        for group in inner_optim_lambda.param_groups:
+                            for p in group['params']:
+                                p.grad = -1 * p.grad
+
+                        inner_optim_lambda.step()
+
+                optimizer.zero_grad()
+                final_state = model.state_dict()
+                delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
+                hnet_grads = torch.autograd.grad(list(weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values()))
+                for p, g in zip(hnet.parameters(), hnet_grads):
+                    p.grad = g
+
+                optimizer.step()
+
+            step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=training_nodes_test, num_nodes=num_nodes-10, hnet=hnet, model=models, device=device, which_position=which_position)
+
+            c_acc_p_epoch.append(all_acc)
+            acc_p_epoch.append(avg_acc_all)
+
+            spd_clients = []
+            eod_clients = []
+
+            for i in range(len(spd)):
                 if i % 2 == 0:
-                    client_fairness.append('dp')
-                    alphas.append(alpha_all[0])
+                    spd_clients.append(spd[i])
+                elif i % 2 == 1:
+                    eod_clients.append(eod[i])
+
+            c_spd_p_epoch.append(spd_clients)
+            spd_p_epoch.append(np.mean(spd_clients))
+
+            c_eod_p_epoch.append(eod_clients)
+            eod_p_epoch.append(np.mean(eod_clients))
+
+            # For multi-round
+            all_acc_10.append(avg_acc_all)
+            all_eod_10.append(np.mean(eod_clients))
+            all_spd_10.append(np.mean(spd_clients))
+
+            final_acc = np.mean(all_acc_10)
+            final_eod = np.mean(all_eod_10)
+            final_spd = np.mean(all_spd_10)
+
+            print(
+                f"Final Results Training Clients| AVG Acc: {avg_acc_all:.4f} | AVG EOD: {np.mean(eod_clients):.4f} | AVG SPD: {np.mean(spd_clients):.4f} | TV: {nodes.total_variation[0]}")
+
+
+            # Train and test 10 remaining clients for 500 rounds
+            print('Starting Novel Client Training')
+
+            all_acc_10 = []
+            all_eod_10 = []
+            all_spd_10 = []
+
+            c_acc_p_epoch = []
+            acc_p_epoch = []
+
+            c_eod_p_epoch = []
+            eod_p_epoch = []
+
+            c_spd_p_epoch = []
+            spd_p_epoch = []
+
+            training_state_dict = hnet.state_dict()
+
+            hnet = LRHyper(device=device, n_nodes=num_nodes, embedding_dim=embed_dim,
+                           context_vector_size=num_features,
+                           hidden_size=num_features, hnet_hidden_dim=hyper_hid, hnet_n_hidden=n_hidden)
+
+            new_client_addition = torch.rand((10,13)).to(device)
+
+            with torch.no_grad():
+                extended_embedding = training_state_dict['embeddings.weight']
+                extended_embedding = torch.cat((extended_embedding, new_client_addition), dim=0)
+                hnet.embeddings.weight.copy_(extended_embedding)
+
+                hnet.mlp[0].weight.copy_(training_state_dict['mlp.0.weight'])
+                hnet.mlp[0].bias.copy_(training_state_dict['mlp.0.bias'])
+
+                hnet.mlp[2].weight.copy_(training_state_dict['mlp.2.weight'])
+                hnet.mlp[2].bias.copy_(training_state_dict['mlp.2.bias'])
+
+                hnet.mlp[4].weight.copy_(training_state_dict['mlp.4.weight'])
+                hnet.mlp[4].bias.copy_(training_state_dict['mlp.4.bias'])
+
+                hnet.mlp[6].weight.copy_(training_state_dict['mlp.6.weight'])
+                hnet.mlp[6].bias.copy_(training_state_dict['mlp.6.bias'])
+
+                hnet.mlp[8].weight.copy_(training_state_dict['mlp.8.weight'])
+                hnet.mlp[8].bias.copy_(training_state_dict['mlp.8.bias'])
+
+                hnet.fc1_weights.weight.copy_(training_state_dict['fc1_weights.weight'])
+                hnet.fc1_weights.bias.copy_(training_state_dict['fc1_weights.bias'])
+                hnet.fc1_bias.weight.copy_(training_state_dict['fc1_bias.weight'])
+                hnet.fc1_bias.bias.copy_(training_state_dict['fc1_bias.bias'])
+
+            for name, param in hnet.named_parameters():
+                if name != 'embeddings.weight':
+                    param.requires_grad = False
                 else:
-                    client_fairness.append('eo')
-                    alphas.append(alpha_all[1])
-        elif fair == 'none':
-            client_fairness = ['none' for i in range(num_nodes)]
-            alphas = [1 for i in range(num_nodes)]
+                    update_layer = param
 
-        hnet = LRHyper(device=device, n_nodes=num_nodes, embedding_dim=embed_dim, context_vector_size=num_features,
-                       hidden_size=num_features, hnet_hidden_dim=hyper_hid, hnet_n_hidden=n_hidden)
+            hnet.to(device)
+            step_iter = trange(500)
+            for round in step_iter:
+                if round == 0:
+                    step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=novel_nodes_test, num_nodes=10, hnet=hnet,
+                                                                              model=models, device=device,
+                                                                              which_position=which_position)
 
-        for i in range(num_nodes):
-            models[i] = LR(input_size=num_features, bound=alphas[i], fairness=client_fairness[i])
-            constraints[i] = Constraint(bound=alphas[i], fair=client_fairness[i])
-            client_optimizers_theta[i] = torch.optim.Adam(models[i].parameters(), lr=inner_lr, weight_decay=inner_wd)
-            if fair != 'none':
-                client_optimizers_lambda[i] = torch.optim.Adam(constraints[i].parameters(), lr=inner_lr, weight_decay=inner_wd)
+                    c_acc_p_epoch.append(all_acc)
+                    acc_p_epoch.append(avg_acc_all)
 
-        hnet.to(device)
+                    spd_clients = []
+                    eod_clients = []
 
-        optimizer = torch.optim.Adam(params=hnet.parameters(), lr=lr, weight_decay=wd)
-        loss = torch.nn.BCELoss()
-        step_iter = trange(steps)
+                    for i in range(len(spd)):
+                        if i % 2 == 0:
+                            spd_clients.append(spd[i])
+                        elif i % 2 == 1:
+                            eod_clients.append(eod[i])
 
-        for round in step_iter:
-            if round == 0:
-                step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=training_nodes_test, num_nodes=num_nodes-10, hnet=hnet,
-                                                                          model=models, device=device,
-                                                                          which_position=which_position)
+                    c_spd_p_epoch.append(spd_clients)
+                    spd_p_epoch.append(np.mean(spd_clients))
 
-                c_acc_p_epoch.append(all_acc)
-                acc_p_epoch.append(avg_acc_all)
-
-                spd_clients = []
-                eod_clients = []
-
-                for i in range(len(spd)):
-                    if i % 2 == 0:
-                        spd_clients.append(spd[i])
-                    elif i % 2 == 1:
-                        eod_clients.append(eod[i])
-
-                c_spd_p_epoch.append(spd_clients)
-                spd_p_epoch.append(np.mean(spd_clients))
-
-                c_eod_p_epoch.append(eod_clients)
-                eod_p_epoch.append(np.mean(eod_clients))
-            hnet.train()
-            node_id = random.choice(range(num_nodes-10))
-
-            model = models[node_id]
-
-            if fair != 'none':
-                constraint = constraints[node_id]
-                constraint.to(device)
-
-            inner_optim_theta = client_optimizers_theta[node_id]
-            inner_optim_lambda = client_optimizers_lambda[node_id]
-
-            weights = hnet(torch.tensor([node_id], dtype=torch.long).to(device))
-            model.load_state_dict(weights)
-            model.to(device)
-            inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
-            model.train()
-
-            for j in range(inner_steps):
-                inner_optim_theta.zero_grad()
-                if fair != 'none':
-                    inner_optim_lambda.zero_grad()
-                optimizer.zero_grad()
-
-                batch = next(iter(training_nodes_train[node_id]))
-                x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
-                s = x[:, which_position].to(device)
-
-                pred, m_mu_q = model(x, s, y)
-                if fair == 'none':
-                    err = loss(pred, y.unsqueeze(1))
-                else:
-                    l = loss(pred, y.unsqueeze(1))
-                    c = constraint(m_mu_q)
-                    er = l + c
-                    err = er.mean()
-
-                err.backward()
-                inner_optim_theta.step()
+                    c_eod_p_epoch.append(eod_clients)
+                    eod_p_epoch.append(np.mean(eod_clients))
+                hnet.train()
+                client_values = [90,91,92,93,94,95,96,97,98,99]
+                node_id = np.random.choice(client_values)
+                place_id = client_values.index(node_id)
+                model = models[node_id]
 
                 if fair != 'none':
-                    constraint.lmbda.data = torch.clamp(constraint.lmbda.data, min=0)
-                    torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1)
+                    constraint = constraints[node_id]
+                    constraint.to(device)
 
-                    if torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1) > b:
-                        print(torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1))
-                        print(constraint.lmbda)
-                        exit(1)
+                inner_optim_theta = client_optimizers_theta[node_id]
+                inner_optim_lambda = client_optimizers_lambda[node_id]
 
-                    for i, item in enumerate(constraint.lmbda.data):
-                        if item < 0:
+                weights = hnet(torch.tensor([node_id], dtype=torch.long).to(device))
+                model.load_state_dict(weights)
+                model.to(device)
+                inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
+                model.train()
+
+                for j in range(10):
+                    inner_optim_theta.zero_grad()
+                    if fair != 'none':
+                        inner_optim_lambda.zero_grad()
+                    optimizer.zero_grad()
+
+                    batch = next(iter(novel_nodes_train[place_id]))
+                    x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
+                    s = x[:, which_position].to(device)
+
+                    pred, m_mu_q = model(x, s, y)
+                    if fair == 'none':
+                        err = loss(pred, y.unsqueeze(1))
+                    else:
+                        l = loss(pred, y.unsqueeze(1))
+                        c = constraint(m_mu_q)
+                        er = l + c
+                        err = er.mean()
+
+                    err.backward()
+                    inner_optim_theta.step()
+
+                    if fair != 'none':
+                        constraint.lmbda.data = torch.clamp(constraint.lmbda.data, min=0)
+                        torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1)
+
+                        if torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1) > b:
+                            print(torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1))
                             print(constraint.lmbda)
-                            exit(2)
+                            exit(1)
 
-                    for group in inner_optim_lambda.param_groups:
-                        for p in group['params']:
-                            p.grad = -1 * p.grad
+                        for i, item in enumerate(constraint.lmbda.data):
+                            if item < 0:
+                                print(constraint.lmbda)
+                                exit(2)
 
-                    inner_optim_lambda.step()
+                        for group in inner_optim_lambda.param_groups:
+                            for p in group['params']:
+                                p.grad = -1 * p.grad
 
-            optimizer.zero_grad()
-            final_state = model.state_dict()
-            delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
-            hnet_grads = torch.autograd.grad(list(weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values()))
-            for p, g in zip(hnet.parameters(), hnet_grads):
-                p.grad = g
+                        inner_optim_lambda.step()
 
-            optimizer.step()
-
-        step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=training_nodes_test, num_nodes=num_nodes-10, hnet=hnet, model=models, device=device, which_position=which_position)
-
-        c_acc_p_epoch.append(all_acc)
-        acc_p_epoch.append(avg_acc_all)
-
-        spd_clients = []
-        eod_clients = []
-
-        for i in range(len(spd)):
-            if i % 2 == 0:
-                spd_clients.append(spd[i])
-            elif i % 2 == 1:
-                eod_clients.append(eod[i])
-
-        c_spd_p_epoch.append(spd_clients)
-        spd_p_epoch.append(np.mean(spd_clients))
-
-        c_eod_p_epoch.append(eod_clients)
-        eod_p_epoch.append(np.mean(eod_clients))
-
-        # For multi-round
-        all_acc_10.append(avg_acc_all)
-        all_eod_10.append(np.mean(eod_clients))
-        all_spd_10.append(np.mean(spd_clients))
-
-        final_acc = np.mean(all_acc_10)
-        final_eod = np.mean(all_eod_10)
-        final_spd = np.mean(all_spd_10)
-
-        final_acc_std = np.std(all_acc_10)
-        final_eod_std = np.std(all_eod_10)
-        final_spd_std = np.std(all_spd_10)
-
-        print(
-            f"\n\nFinal Results Training Clients| AVG Acc: {final_acc:.4f}, {final_acc_std:.4f} | AVG EOD: {final_eod:.4f}, {final_eod_std:.4f} | AVG SPD: {final_spd:.4f}, {final_spd_std:.4f}")
-
-
-        # Train and test 10 remaining clients for 500 rounds
-
-        for param in hnet.parameters():
-            print(param)
-            param.requires_grad = False
-        exit(1)
-
-        step_iter = trange(500)
-        for round in step_iter:
-            if round == 0:
-                step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=novel_nodes_test, num_nodes=10, hnet=hnet,
-                                                                          model=models, device=device,
-                                                                          which_position=which_position)
-
-                c_acc_p_epoch.append(all_acc)
-                acc_p_epoch.append(avg_acc_all)
-
-                spd_clients = []
-                eod_clients = []
-
-                for i in range(len(spd)):
-                    if i % 2 == 0:
-                        spd_clients.append(spd[i])
-                    elif i % 2 == 1:
-                        eod_clients.append(eod[i])
-
-                c_spd_p_epoch.append(spd_clients)
-                spd_p_epoch.append(np.mean(spd_clients))
-
-                c_eod_p_epoch.append(eod_clients)
-                eod_p_epoch.append(np.mean(eod_clients))
-            hnet.train()
-            node_id = random.choice([90,91,92,93,94,95,96,97,98,99])
-
-            model = models[node_id]
-
-            if fair != 'none':
-                constraint = constraints[node_id]
-                constraint.to(device)
-
-            inner_optim_theta = client_optimizers_theta[node_id]
-            inner_optim_lambda = client_optimizers_lambda[node_id]
-
-            weights = hnet(torch.tensor([node_id], dtype=torch.long).to(device))
-            model.load_state_dict(weights)
-            model.to(device)
-            inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
-            model.train()
-
-            for j in range(inner_steps):
-                inner_optim_theta.zero_grad()
-                if fair != 'none':
-                    inner_optim_lambda.zero_grad()
                 optimizer.zero_grad()
+                final_state = model.state_dict()
+                delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
 
-                batch = next(iter(novel_nodes_train[node_id]))
-                x, y = tuple((t.type(torch.cuda.FloatTensor)).to(device) for t in batch)
-                s = x[:, which_position].to(device)
+                hnet_grads = torch.autograd.grad(list(weights.values()), update_layer, grad_outputs=list(delta_theta.values()))
+                for p, g in zip(hnet.parameters(), hnet_grads):
+                    p.grad = g
 
-                pred, m_mu_q = model(x, s, y)
-                if fair == 'none':
-                    err = loss(pred, y.unsqueeze(1))
-                else:
-                    l = loss(pred, y.unsqueeze(1))
-                    c = constraint(m_mu_q)
-                    er = l + c
-                    err = er.mean()
+                optimizer.step()
+            step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=novel_nodes_test, num_nodes=10,
+                                                                      hnet=hnet, model=models, device=device,
+                                                                      which_position=which_position)
 
-                err.backward()
-                inner_optim_theta.step()
+            c_acc_p_epoch.append(all_acc)
+            acc_p_epoch.append(avg_acc_all)
 
-                if fair != 'none':
-                    constraint.lmbda.data = torch.clamp(constraint.lmbda.data, min=0)
-                    torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1)
+            spd_clients = []
+            eod_clients = []
 
-                    if torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1) > b:
-                        print(torch.nn.utils.clip_grad_norm_(constraint.lmbda.data, b, norm_type=1))
-                        print(constraint.lmbda)
-                        exit(1)
+            for i in range(len(spd)):
+                if i % 2 == 0:
+                    spd_clients.append(spd[i])
+                elif i % 2 == 1:
+                    eod_clients.append(eod[i])
 
-                    for i, item in enumerate(constraint.lmbda.data):
-                        if item < 0:
-                            print(constraint.lmbda)
-                            exit(2)
+            c_spd_p_epoch.append(spd_clients)
+            spd_p_epoch.append(np.mean(spd_clients))
 
-                    for group in inner_optim_lambda.param_groups:
-                        for p in group['params']:
-                            p.grad = -1 * p.grad
+            c_eod_p_epoch.append(eod_clients)
+            eod_p_epoch.append(np.mean(eod_clients))
 
-                    inner_optim_lambda.step()
+            # For multi-round
+            all_acc_10.append(avg_acc_all)
+            all_eod_10.append(np.mean(eod_clients))
+            all_spd_10.append(np.mean(spd_clients))
 
-            optimizer.zero_grad()
-            final_state = model.state_dict()
-            delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
-            hnet_grads = torch.autograd.grad(list(weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values()))
-            for p, g in zip(hnet.parameters(), hnet_grads):
-                p.grad = g
+            final_acc_novel = np.mean(all_acc_10)
+            final_eod_novel = np.mean(all_eod_10)
+            final_spd_novel = np.mean(all_spd_10)
 
-            optimizer.step()
-        step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=novel_nodes_test, num_nodes=10,
-                                                                  hnet=hnet, model=models, device=device,
-                                                                  which_position=which_position)
+            total_variation = nodes.total_variation
 
-        c_acc_p_epoch.append(all_acc)
-        acc_p_epoch.append(avg_acc_all)
+            avg_acc_difference = final_acc_novel - final_acc
+            avg_eod_difference = final_eod_novel - final_eod
+            avg_spd_difference = final_spd_novel - final_spd
 
-        spd_clients = []
-        eod_clients = []
+            print(f"Final Results Novel Clients| AVG Acc: {avg_acc_all:.4f} | AVG EOD: {np.mean(eod_clients):.4f} | AVG SPD: {np.mean(spd_clients):.4f}")
 
-        for i in range(len(spd)):
-            if i % 2 == 0:
-                spd_clients.append(spd[i])
-            elif i % 2 == 1:
-                eod_clients.append(eod[i])
+            TV.append(total_variation[0])
+            avg_acc_difference_all.append(avg_acc_difference)
+            avg_eod_difference_all.append(avg_eod_difference)
+            avg_spd_difference_all.append(avg_spd_difference)
 
-        c_spd_p_epoch.append(spd_clients)
-        spd_p_epoch.append(np.mean(spd_clients))
+        repeated_acc.append(np.mean(avg_acc_difference_all))
+        repeated_eod.append(np.mean(avg_eod_difference_all))
+        repeated_spd.append(np.mean(avg_spd_difference_all))
+        tv_f.append(np.mean(TV))
 
-        c_eod_p_epoch.append(eod_clients)
-        eod_p_epoch.append(np.mean(eod_clients))
+    sns.set(font_scale=1.5)
 
-        final_acc = np.mean(all_acc_10)
-        final_eod = np.mean(all_eod_10)
-        final_spd = np.mean(all_spd_10)
+    plt.plot(tv_f, repeated_acc, 'b-', linewidth=2, label='Acc')
+    plt.plot(tv_f, repeated_eod, 'r-', linewidth=2, label='EOD')
+    plt.plot(tv_f, repeated_spd, 'g', linewidth=2, label='SPD')
+    plt.xlabel('Total Variation (nats)')
+    plt.ylabel('Generalization Gap')
+    #plt.ylim([-1, 1])
+    plt.tight_layout()
+    plt.show()
 
-        final_acc_std = np.std(all_acc_10)
-        final_eod_std = np.std(all_eod_10)
-        final_spd_std = np.std(all_spd_10)
-
-        print(f"\n\nFinal Results Novel Clients| AVG Acc: {final_acc:.4f}, {final_acc_std:.4f} | AVG EOD: {final_eod:.4f}, {final_eod_std:.4f} | AVG SPD: {final_spd:.4f}, {final_spd_std:.4f}")
-
-    # file = open("/home/ancarey/FairFLHN/large-federation/10-run-results.txt", "a")
-    # file.write(
-    #     "\n Num Clients: {0}, Avg Acc: {1:.4f},{2:.4f}, Avg EOD: {3:.4f},{4:.4f}, Avg SPD: {5:.4f},{6:.4f}".format(
-    #         num_nodes, final_acc, final_acc_std, final_eod, final_eod_std, final_spd, final_spd_std))
-    # file.close()
-    # sns.set(font_scale=1.5)
-    #
-    # maxes_acc = []
-    # mins_acc = []
-    # std_acc = []
-    #
-    # maxes_eod = []
-    # mins_eod = []
-    # std_eod = []
-    #
-    # maxes_spd = []
-    # mins_spd = []
-    # std_spd = []
-    #
-    # mean_1 = acc_p_epoch
-    # mean_2 = eod_p_epoch
-    # mean_3 = spd_p_epoch
-    #
-    # x = np.arange(0, 5100, step=100)
-    # print(x)
-    # for i in range(len(c_acc_p_epoch)):
-    #     maxes_acc.append(max(c_acc_p_epoch[i]))
-    #     mins_acc.append(min(c_acc_p_epoch[i]))
-    #     std_acc.append(np.std(c_acc_p_epoch[i]))
-    #
-    #     maxes_eod.append(max(c_eod_p_epoch[i]))
-    #     mins_eod.append(min(c_eod_p_epoch[i]))
-    #     std_eod.append(np.std(c_eod_p_epoch[i]))
-    #
-    #     maxes_spd.append(max(c_spd_p_epoch[i]))
-    #     mins_spd.append(min(c_spd_p_epoch[i]))
-    #     std_spd.append(np.std(c_spd_p_epoch[i]))
-    #
-    #
-    # plt.plot(x, mean_1, 'b-', linewidth=2)
-    # plt.plot(x, mins_acc, linestyle='dotted', linewidth=1.5, color='black')
-    # plt.plot(x, maxes_acc, linestyle='dotted', linewidth=1.5, color='black')
-    # plt.fill_between(x, np.subtract(mean_1,std_acc), np.add(mean_1,std_acc), color='b', alpha=0.2)
-    # plt.xlabel('Round')
-    # plt.ylabel('Accuracy')
-    # plt.ylim([0, 1])
-    # plt.tight_layout()
-    # plt.show()
-    #
-    # plt.plot(x, mean_2, 'r-')
-    # plt.plot(x, mins_eod, linestyle='dotted', linewidth=1.5, color='black')
-    # plt.plot(x, maxes_eod, linestyle='dotted', linewidth=1.5, color='black')
-    # plt.fill_between(x, np.subtract(mean_2, std_eod), np.add(mean_2, std_eod), color='r', alpha=0.2)
-    # plt.xlabel('Round')
-    # plt.ylabel('EOD')
-    # plt.ylim([-.5, .5])
-    # plt.tight_layout()
-    # plt.show()
-    #
-    # plt.plot(x, mean_3, 'g-')
-    # plt.plot(x, mins_spd, linestyle='dotted', linewidth=1.5, color='black')
-    # plt.plot(x, maxes_spd, linestyle='dotted', linewidth=1.5, color='black')
-    # plt.fill_between(x, np.subtract(mean_3, std_spd), np.add(mean_3, std_spd), color='g', alpha=0.2)
-    # plt.xlabel('Round')
-    # plt.ylabel('SPD')
-    # plt.ylim([-.5, .5])
-    # plt.tight_layout()
-    # plt.show()
-    #
-    # plt.plot(x, mean_1, 'b-', linewidth=2)
-    # plt.fill_between(x, np.subtract(mean_1, std_acc), np.add(mean_1, std_acc), color='b', alpha=0.2)
-    # plt.xlabel('Round')
-    # plt.ylabel('Accuracy')
-    # plt.ylim([0, 1])
-    # plt.tight_layout()
-    # plt.show()
-    #
-    # plt.plot(x, mean_2, 'r-')
-    # plt.fill_between(x, np.subtract(mean_2, std_eod), np.add(mean_2, std_eod), color='r', alpha=0.2)
-    # plt.xlabel('Round')
-    # plt.ylabel('EOD')
-    # plt.ylim([-.5, .5])
-    # plt.tight_layout()
-    # plt.show()
-    #
-    # plt.plot(x, mean_3, 'g-')
-    # plt.fill_between(x, np.subtract(mean_3, std_spd), np.add(mean_3, std_spd), color='g', alpha=0.2)
-    # plt.xlabel('Round')
-    # plt.ylabel('SPD')
-    # plt.ylim([-.5, .5])
-    # plt.tight_layout()
-    # plt.show()
 
 def main():
     file = open("/home/ancarey/FairFLHN/large-federation/10-run-results.txt", "w")
@@ -519,8 +521,8 @@ def main():
         parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
         parser.add_argument("--num_nodes", type=int, default=c, help="number of simulated clients")
         parser.add_argument("--num_steps", type=int, default=5000)
-        parser.add_argument("--batch_size", type=int, default=256)
-        parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
+        parser.add_argument("--batch_size", type=int, default=32)
+        parser.add_argument("--inner_steps", type=int, default=10, help="number of inner steps")
         parser.add_argument("--n_hidden", type=int, default=4, help="num. hidden layers")
         parser.add_argument("--inner_lr", type=float, default=.001, help="learning rate for inner optimizer")
         parser.add_argument("--lr", type=float, default=1e-5, help="learning rate")
@@ -536,7 +538,9 @@ def main():
         args = parser.parse_args()
         set_logger()
         device = "cuda:2"
-        print("\nStarting ", c, "clients training")
+        print("\n====================")
+        print("| Starting Training |")
+        print("=====================")
         args.classes_per_node = 2
         train(
             device=device,

@@ -99,7 +99,9 @@ def get_dataset(data_name):
 
     train_data = clean_and_encode_dataset(read_dataset(TRAIN_DATA_FILE, data_types, 'adult'), 'adult')  #(32561, 14)
     test_data = clean_and_encode_dataset(read_dataset(TEST_DATA_FILE, data_types, 'adult'), 'adult')    #(16281, 14)
-
+    #train_data = train_data.sort_values('workclass').reset_index(drop=True)
+    #test_data = test_data.sort_values('workclass').reset_index(drop=True)
+    #splits = [train_data.index[np.searchsorted(train_data['workclass'], .5, side='right')],test_data.index[np.searchsorted(test_data['workclass'], .5, side='right')+1]]
     datasets = [train_data, test_data]
 
     cols = train_data.columns
@@ -116,39 +118,17 @@ def gen_random_loaders(data_name, num_clients, bz):
     all_client_test_train = [[], []]
 
     for j, data_copy in enumerate(datasets):
-        min_size = 0
 
         if j == 0:
-            min_require_size = 500
+            min = 500
         else:
-            min_require_size = 200
+            min = 200
 
-        # Sample according to the Dirichlet distribution
-        # Minimum number of samples 1 client will have is 500 for train and 200 for test
-        while min_size < min_require_size:
-            idx_batch = [[] for _ in range(num_clients - 10)]
-
-            for k in range(2):
-                idx_k = np.where(data_copy['income_class'] == k)[0]
-                np.random.shuffle(idx_k)
-
-                proportions = np.random.dirichlet(np.repeat(.1, num_clients-10))
-
-                for i in range(10):
-                    choice = np.random.choice([.1, .25, .5, 1])
-                    proportions_novel = np.random.dirichlet(np.repeat(choice, 10))
-
-                np.append(proportions, proportions_novel)
-
-                proportions = np.array([p * (len(idx_j) < len(data_copy) / num_clients) for p, idx_j in zip(proportions, idx_batch)])
-
-                proportions = proportions / proportions.sum()
-                proportions = (np.cumsum(proportions) * len(idx_k)).astype(int)[:-1]
-                idx_batch = [idx_j + idx.tolist() for idx_j, idx in zip(idx_batch, np.split(idx_k, proportions))]
-                min_size = min([len(idx_j) for idx_j in idx_batch])
+        amounts = [random.randint(min, int((len(data_copy)/2))) for i in range(num_clients)]
 
         for i in range(num_clients):
-            client_data = data_copy.iloc[idx_batch[i]]
+            client_data = data_copy.sample(n = amounts[i], replace=True, ignore_index = False)
+
             all_client_test_train[j].append(TabularData(client_data[features].values, client_data[labels].values))
 
         subsets = all_client_test_train[j]
