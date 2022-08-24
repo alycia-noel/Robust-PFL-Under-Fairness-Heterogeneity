@@ -96,7 +96,8 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
 
     b = 1/alpha_all[0]
 
-    ranges = [2, 4, 6, 8, 10]
+    #ranges = [.75, .25, 1, .5, 2, 5, .1]
+    ranges = [.05, .1]
     for i,r in enumerate(ranges):
         all_acc_10 = []
         all_spd_10 = []
@@ -352,7 +353,7 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
                     update_layer = param
 
             hnet.to(device)
-            step_iter = trange(500)
+            step_iter = trange(1000)
             for round in step_iter:
                 if round == 0:
                     step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=novel_nodes_test, num_nodes=10, hnet=hnet,
@@ -395,7 +396,7 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
                 inner_state = OrderedDict({k: tensor.data for k, tensor in weights.items()})
                 model.train()
 
-                for j in range(10):
+                for j in range(50):
                     inner_optim_theta.zero_grad()
                     if fair != 'none':
                         inner_optim_lambda.zero_grad()
@@ -521,7 +522,7 @@ def main():
         parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
         parser.add_argument("--num_nodes", type=int, default=c, help="number of simulated clients")
         parser.add_argument("--num_steps", type=int, default=5000)
-        parser.add_argument("--batch_size", type=int, default=32)
+        parser.add_argument("--batch_size", type=int, default=256)
         parser.add_argument("--inner_steps", type=int, default=10, help="number of inner steps")
         parser.add_argument("--n_hidden", type=int, default=4, help="num. hidden layers")
         parser.add_argument("--inner_lr", type=float, default=.001, help="learning rate for inner optimizer")

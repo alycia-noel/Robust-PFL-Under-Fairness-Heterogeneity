@@ -1,24 +1,45 @@
 # import seaborn as sns
 # import matplotlib.pyplot as plt
-
-# acc = [.0121, .09628, .077445, .131979]
-# eod = [.11106, .03842, .04918, .07342]
-# spd = [.01786, .0163, .01232, .01372]
-# x = [.14, .16, .34, .48]
+# import numpy as np
+#
+# acc = [.1362, .1148, .1517, .1924, .1746, .1645, .2628, .3267, .2598]
+# eod = [.0457, .0277, .1243, .0366, .1256, .0256, .0906, .0634, .1118]
+# spd = [.0077, .0621, .0127, .0017, .0371, .0201, .0138, .1017, .0994]
+# x = [.05, .09, .13, .16, .2, .21, .46, .57, .61]
 #
 # sns.set(font_scale=1.25)
 #
-# fig, ax1 = plt.subplots()
-# ax2 = ax1.twinx()
 #
-# ax1.plot(x, acc, 'b-*', label='Accuracy')
-# ax1.plot(x, eod, 'r-o', label='EOD')
-# ax2.plot(x, spd, 'g-+', label='SPD')
-# ax1.legend()
-# ax1.set_xlabel('Total Variation (e-3)')
-# ax1.set_ylabel('Generalization Gap (Acc/EOD)')
-# ax1.set_xlim([.10,.5])
-# ax2.set_ylabel('Generalization Gap (SPD)')
+# data = (acc, eod, spd)
+#
+# X = np.arange(9)
+#
+# plt.bar(X + 0.00, data[0], color = 'b', width = 0.25)
+# plt.bar(X + 0.25, data[1], color = 'g', width = 0.25)
+# plt.bar(X + 0.50, data[2], color = 'r', width = 0.25)
+#
+# plt.xlabel('Total Variation (e-3)')
+# plt.ylabel('Generalization Gap')
+# plt.legend(labels=['Acc', 'EOD', 'SPD'])
+# plt.xticks(X + 0.25, x)
+# plt.tight_layout()
+# plt.show()
+#
+# e_x = np.polyfit(x, eod, 1)
+# s_x = np.polyfit(x, eod, 1)
+# trend_eod = np.poly1d(e_x)
+# trend_spd = np.poly1d(s_x)
+#
+# plt.plot(x, acc, 'b-', label='Accuracy')
+# plt.plot(x, eod, 'r-', label='EOD')
+# plt.plot(x, trend_eod(eod), 'r--')
+# plt.plot(x, spd, 'g-', label='SPD')
+# plt.plot(x, trend_spd(spd), 'g--')
+# plt.legend()
+# plt.xlabel('Total Variation (e-3)')
+# plt.ylabel('Generalization Gap')
+# plt.xlim([0,.65])
+#
 # plt.tight_layout()
 # plt.show()
 
@@ -60,7 +81,7 @@ def rdirch(alphas):
 fig, ax = plt.subplots(1, 1, figsize=(10, 5))
 ax.set_xlim([0, 1])
 ax.set_title(r'$\operatorname{Dir}(1, 2)$')
-x = np.array([rdirch(np.array([1, 1])) for _ in range(1000)])
+x = np.array([rdirch(np.array([1, 5])) for _ in range(90)])
 _ = sns.distplot(x[:, 0], ax=ax, label=r'$\alpha_1$')
 _ = sns.distplot(x[:, 1], ax=ax, label=r'$\alpha_2$')
 _ = plt.legend()
@@ -69,7 +90,7 @@ plt.show()
 fig, ax = plt.subplots(1, 1, figsize=(10, 5))
 ax.set_xlim([0, 1])
 ax.set_title(r'$\operatorname{Dir}(2, 4)$')
-x = np.array([rdirch(np.array([1, 4])) for _ in range(1000)])
+x = np.array([rdirch(np.array([1, 1])) for _ in range(10)])
 _ = sns.distplot(x[:, 0], ax=ax, label=r'$\alpha_1$')
 _ = sns.distplot(x[:, 1], ax=ax, label=r'$\alpha_2$')
 _ = plt.legend()

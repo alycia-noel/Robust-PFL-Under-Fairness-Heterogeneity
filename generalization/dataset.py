@@ -135,18 +135,31 @@ def gen_random_loaders(data_name, num_clients, bz, r):
     for j, data_copy in enumerate(datasets):
         num_classes = 2
 
-        label_distribution = np.random.dirichlet([1,1], 90) #(2, 90)
+        alpha = [x+1 for x in range(30)]
 
-        zero_distribution = label_distribution[:, 0]
-        one_distribution = label_distribution[:, 1]
+        #for _, a in enumerate(alpha):
+        np.random.seed(0)
+        label_distribution_first_half = np.random.dirichlet([5,1], 90).tolist() #(2, 90)
+        #label_distribution_second_half = np.random.dirichlet([1,5], 45).tolist()
 
-        proportions_novel = np.random.dirichlet([1, r], 10)
+        label_distribution = []
+        label_distribution = label_distribution_first_half
+
+        # for i in range(45):
+        #     label_distribution.append(label_distribution_first_half[i])
+        #     label_distribution.append(label_distribution_second_half[i])
+
+        zero_distribution = [z[0] for _,z in enumerate(label_distribution)]
+        one_distribution = [z[1] for _,z in enumerate(label_distribution)]
+
+        proportions_novel = np.random.dirichlet([r, r], 10)
         zero_distribution = np.append(zero_distribution, proportions_novel[:,0])
         one_distribution = np.append(one_distribution, proportions_novel[:,1])
 
         # normalize so sum_i p_i,j = 1 for all classes j
         zero_distribution = [float(i)/sum(zero_distribution) for i in zero_distribution]
         one_distribution = [float(i)/sum(one_distribution) for i in one_distribution]
+
 
         novel_clients = [90, 91, 92, 93, 94, 95, 96, 97, 98, 99]
 
@@ -160,7 +173,10 @@ def gen_random_loaders(data_name, num_clients, bz, r):
         for i in range(90):
             Q.append([zero_distribution[i], one_distribution[i]])
 
+        #print('Alpha:', a, 'TV:', TotalVariation(Q, P, zero_distribution, one_distribution))
+
         total_variation.append(TotalVariation(Q, P, zero_distribution, one_distribution))
+
 
         class_idcs = [np.argwhere(np.array(data_copy['income_class'] == y)).flatten() for y in range(num_classes)]
 
