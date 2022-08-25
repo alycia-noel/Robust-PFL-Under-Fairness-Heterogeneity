@@ -135,31 +135,24 @@ def gen_random_loaders(data_name, num_clients, bz, r):
     for j, data_copy in enumerate(datasets):
         num_classes = 2
 
-        alpha = [x+1 for x in range(30)]
+        #alpha = [x for x in [.1, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5]]
 
         #for _, a in enumerate(alpha):
-        np.random.seed(0)
-        label_distribution_first_half = np.random.dirichlet([5,1], 90).tolist() #(2, 90)
-        #label_distribution_second_half = np.random.dirichlet([1,5], 45).tolist()
+        zero_distribution_train = np.random.beta(.5, .5, 90) #(2, 90)
 
-        label_distribution = []
-        label_distribution = label_distribution_first_half
+        one_distribution_train = [1-x for x in zero_distribution_train]
 
-        # for i in range(45):
-        #     label_distribution.append(label_distribution_first_half[i])
-        #     label_distribution.append(label_distribution_second_half[i])
+        #label_distribution = [[x,y] for x,y in zip(zero_distribution, one_distribution)]
 
-        zero_distribution = [z[0] for _,z in enumerate(label_distribution)]
-        one_distribution = [z[1] for _,z in enumerate(label_distribution)]
+        zero_distribution_novel = np.random.beta(r, r, 10)
+        one_distribution_novel = [1-x for x in zero_distribution_novel]
 
-        proportions_novel = np.random.dirichlet([r, r], 10)
-        zero_distribution = np.append(zero_distribution, proportions_novel[:,0])
-        one_distribution = np.append(one_distribution, proportions_novel[:,1])
+        zero_distribution = np.append(zero_distribution_train, zero_distribution_novel)
+        one_distribution = np.append(one_distribution_train, one_distribution_novel)
 
         # normalize so sum_i p_i,j = 1 for all classes j
-        zero_distribution = [float(i)/sum(zero_distribution) for i in zero_distribution]
-        one_distribution = [float(i)/sum(one_distribution) for i in one_distribution]
-
+        # zero_distribution = [float(i)/sum(zero_distribution) for i in zero_distribution]
+        # one_distribution = [float(i)/sum(one_distribution) for i in one_distribution]
 
         novel_clients = [90, 91, 92, 93, 94, 95, 96, 97, 98, 99]
 
@@ -174,20 +167,22 @@ def gen_random_loaders(data_name, num_clients, bz, r):
             Q.append([zero_distribution[i], one_distribution[i]])
 
         #print('Alpha:', a, 'TV:', TotalVariation(Q, P, zero_distribution, one_distribution))
-
+        #exit(1)
         total_variation.append(TotalVariation(Q, P, zero_distribution, one_distribution))
 
-
-        class_idcs = [np.argwhere(np.array(data_copy['income_class'] == y)).flatten() for y in range(num_classes)]
-
-        proportions = [zero_distribution, one_distribution]
+        zero_class_idcs = np.argwhere(np.array(data_copy['income_class'] == 0)).flatten().tolist()
+        one_class_idcs = np.argwhere(np.array(data_copy['income_class'] == 1)).flatten().tolist()
         client_idcs = [[] for _ in range(num_clients)]
 
-        for c, fracs in zip(class_idcs, proportions):
-            for i, idcs in enumerate(np.split(c, (np.cumsum(fracs)[:-1]*len(c)).astype(int))):
-                client_idcs[i] += [idcs]
+        for i in range(num_clients):
+            num_data_points = np.random.choice(range(100, 4000))
+            num_zero_points = int(zero_distribution[i] * num_data_points)
+            num_one_points = int(one_distribution[i] * num_data_points)
 
-        client_idcs = [np.concatenate(idcs) for idcs in client_idcs]
+            zero_idcs = random.choices(zero_class_idcs, k=num_zero_points)
+            one_idcs = random.choices(one_class_idcs, k=num_one_points)
+
+            client_idcs[i] = np.append(zero_idcs, one_idcs)
 
         for i in range(num_clients):
             client_data = data_copy.iloc[client_idcs[i]]

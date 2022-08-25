@@ -97,7 +97,7 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
     b = 1/alpha_all[0]
 
     #ranges = [.75, .25, 1, .5, 2, 5, .1]
-    ranges = [.05, .1]
+    ranges = [.1, .5, 1, 2, 3]
     for i,r in enumerate(ranges):
         all_acc_10 = []
         all_spd_10 = []
@@ -106,9 +106,9 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
         avg_eod_difference_all = []
         avg_spd_difference_all = []
         TV = []
+        seed_everything(0)
+        for n in range(5):
 
-        for n in range(1):
-            seed_everything(0)
             print('\n\nRound', n, 'for alpha', r)
             print('======================')
             models = [None for i in range(num_nodes)]
