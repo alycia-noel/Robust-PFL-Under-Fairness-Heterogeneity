@@ -3,11 +3,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy import interpolate
 
-acc = [0.00085, 0.00782, .0034, 0.00192, 0.02976]
-eod = [0.03025, 0.01826, .02848, 0.02974, 0.00338]
-spd = [0.024025, 0.01148, .0674, 0.06142, 0.0024]
+acc = [-.00454, -.0504, .00142, -.02524, -.0238]
+spd = [.01482, .03908, .00256, .02082, -.00818]
+eod = [.0242, .00464, .0132, -.03706, -.0425]
 
-x = [.2, .6, .7, .8, 1]
+x = [.3, .5, .7, .8, .9]
 
 sns.set(font_scale=1.25)
 
@@ -22,27 +22,29 @@ s = plt.bar(X + 0.50, data[2], color = 'r', width = 0.25)
 
 plt.xlabel('Total Variation (e-2)')
 plt.ylabel('Generalization Gap')
-plt.legend(labels=['Acc.', 'EOD', 'SPD'])
 plt.xticks(X + 0.25, x)
-plt.yticks([0, .01, .02, .03, .04, .05, .06, .07, .08, .09, .1])
+plt.yticks([ -.05, -.04, -.03, -.02, -.01, 0, .01, .02, .03, .04])
+plt.legend(bbox_to_anchor=(0, 1.02, 1, 0.2), loc="lower left",
+                mode="expand", borderaxespad=0, ncol=3, labels=['Accuracy', 'EOD', 'SPD'])
+# Put a legend to the right of the current axis
 plt.tight_layout()
 plt.show()
 
-x_new = np.linspace(0, 1)
-bspline = interpolate.make_interp_spline(x, acc)
-y_new = bspline(x_new)
-
-plt.plot(x, acc, 'b-', label='Accuracy')
-#plt.plot(x_new, y_new, 'b-', label='Accuracy')
-plt.plot(x, eod, 'r-', label='EOD')
-plt.plot(x, spd, 'g-', label='SPD')
-plt.legend()
-plt.xlabel('Total Variation (e-2)')
-plt.ylabel('Generalization Gap')
-plt.xlim([0.1,1.1])
-
-plt.tight_layout()
-plt.show()
+# x_new = np.linspace(0, 1)
+# bspline = interpolate.make_interp_spline(x, acc)
+# y_new = bspline(x_new)
+#
+# plt.plot(x, acc, 'b-', label='Accuracy')
+# #plt.plot(x_new, y_new, 'b-', label='Accuracy')
+# plt.plot(x, eod, 'r-', label='EOD')
+# plt.plot(x, spd, 'g-', label='SPD')
+# plt.legend()
+# plt.xlabel('Total Variation (e-2)')
+# plt.ylabel('Generalization Gap')
+# plt.xlim([0.1,1.1])
+#
+# plt.tight_layout()
+# plt.show()
 
 # import matplotlib.pyplot as plt
 # import numpy as np
