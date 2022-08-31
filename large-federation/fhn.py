@@ -282,7 +282,7 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
         c_eod_p_epoch.append(eod_clients)
         eod_p_epoch.append(np.mean(eod_clients))
 
-        # For multi-round
+        #For multi-round
         all_acc_10.append(avg_acc_all)
         all_eod_10.append(np.mean(eod_clients))
         all_spd_10.append(np.mean(spd_clients))
@@ -359,30 +359,6 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
     # plt.plot(x, mean_3, 'g-')
     # plt.plot(x, mins_spd, linestyle='dotted', linewidth=1.5, color='black')
     # plt.plot(x, maxes_spd, linestyle='dotted', linewidth=1.5, color='black')
-    # plt.fill_between(x, np.subtract(mean_3, std_spd), np.add(mean_3, std_spd), color='g', alpha=0.2)
-    # plt.xlabel('Round')
-    # plt.ylabel('SPD')
-    # plt.ylim([-.5, .5])
-    # plt.tight_layout()
-    # plt.show()
-    #
-    # plt.plot(x, mean_1, 'b-', linewidth=2)
-    # plt.fill_between(x, np.subtract(mean_1, std_acc), np.add(mean_1, std_acc), color='b', alpha=0.2)
-    # plt.xlabel('Round')
-    # plt.ylabel('Accuracy')
-    # plt.ylim([0, 1])
-    # plt.tight_layout()
-    # plt.show()
-    #
-    # plt.plot(x, mean_2, 'r-')
-    # plt.fill_between(x, np.subtract(mean_2, std_eod), np.add(mean_2, std_eod), color='r', alpha=0.2)
-    # plt.xlabel('Round')
-    # plt.ylabel('EOD')
-    # plt.ylim([-.5, .5])
-    # plt.tight_layout()
-    # plt.show()
-    #
-    # plt.plot(x, mean_3, 'g-')
     # plt.fill_between(x, np.subtract(mean_3, std_spd), np.add(mean_3, std_spd), color='g', alpha=0.2)
     # plt.xlabel('Round')
     # plt.ylabel('SPD')

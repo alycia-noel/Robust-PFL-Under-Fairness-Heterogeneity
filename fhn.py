@@ -16,14 +16,14 @@ from utils import seed_everything, set_logger, TP_FP_TN_FN, metrics
 warnings.filterwarnings("ignore")
 
 def eval_model(nodes, num_nodes, hnet, model, device, which_position):
-    curr_results, preds, true, a, f_a, m_a, eod, spd = evaluate(nodes, num_nodes, hnet, model, device, which_position)
+    curr_results, preds, true, a, eod, spd = evaluate(nodes, num_nodes, hnet, model, device, which_position)
     total_correct = sum([val['correct'] for val in curr_results.values()])
     total_samples = sum([val['total'] for val in curr_results.values()])
     avg_acc = total_correct / total_samples
 
     all_acc = [val['correct'] / val['total'] for val in curr_results.values()]
 
-    return curr_results, avg_acc, all_acc, f_a, m_a, eod, spd
+    return curr_results, avg_acc, all_acc, eod, spd
 
 @torch.no_grad()
 def evaluate(nodes, num_nodes, hnet, models, device, which_position):
@@ -66,11 +66,9 @@ def evaluate(nodes, num_nodes, hnet, models, device, which_position):
 
         tp, fp, tn, fn = TP_FP_TN_FN(queries_client, pred_client, true_client, which_position)
         print(tp, fp, tn, fn)
-        accuracy, f_acc, m_acc, EOD, SPD = metrics(tp, fp, tn, fn)
+        accuracy, EOD, SPD = metrics(tp, fp, tn, fn)
 
         a.append(accuracy)
-        f_a.append(f_acc)
-        m_a.append(m_acc)
         eod.append(EOD)
         spd.append(SPD)
         results[node_id]['correct'] = running_correct
@@ -78,7 +76,7 @@ def evaluate(nodes, num_nodes, hnet, models, device, which_position):
         preds.append(pred_client)
         true.append(true_client)
 
-    return results, preds, true, a, f_a, m_a, eod, spd
+    return results, preds, true, a, eod, spd
 
 def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr, inner_lr, wd, inner_wd, hyper_hid, n_hidden, bs, alpha, fair, which_position):
 
@@ -120,7 +118,7 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
                     alphas.append(alpha[1])
         elif fair == 'none':
             client_fairness = ['none' for i in range(num_nodes)]
-            alphas = ['none' for i in range(num_nodes)]
+            alphas = [1 for i in range(num_nodes)]
 
         hnet = LRHyper(device=device, n_nodes=num_nodes, embedding_dim=embed_dim, context_vector_size=num_features,
                        hidden_size=num_features, hnet_hidden_dim=hyper_hid, hnet_n_hidden=n_hidden)
@@ -205,20 +203,15 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
             optimizer.zero_grad()
             final_state = model.state_dict()
             delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in weights.keys()})
-            print(delta_theta)
-            hnet_grads = torch.autograd.grad(list(weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values()))
 
-            for names, param in enumerate(hnet.named_parameters()):
-                print(names)
-                print(param)
-            exit(1)
+            hnet_grads = torch.autograd.grad(list(weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values()))
 
             for p, g in zip(hnet.parameters(), hnet_grads):
                 p.grad = g
 
             optimizer.step()
 
-        step_results, avg_acc_all, all_acc, f_a, m_a, eod, spd = eval_model(nodes=nodes, num_nodes=num_nodes, hnet=hnet, model=models, device=device, which_position=which_position)
+        step_results, avg_acc_all, all_acc, eod, spd = eval_model(nodes=nodes, num_nodes=num_nodes, hnet=hnet, model=models, device=device, which_position=which_position)
         logging.info(f"\n\nFinal Results | AVG Acc: {avg_acc_all:.4f}")
         avg_acc[0].append(avg_acc_all)
         for i in range(num_nodes):
@@ -228,10 +221,10 @@ def train(device, data_name, classes_per_node, num_nodes, steps, inner_steps, lr
         all_times.append(step_iter.format_dict["elapsed"])
 
 
-    file = open("/home/ancarey/FairFLHN/experiments/new/pFedHN/results/four-layer-hp-compas.txt", "a")
-    file.write(
-        "\n CLR: {13}, HLR: {14}, AVG Acc: {0:.4f}, C1 ACC: {1:.4f}, C2 ACC: {2:.4f}, C3 ACC: {3:.4f}, C4 ACC: {4:.4f}, C1 EOD: {5: .4f}, C2 EOD: {6:.4f}, C3 EOD: {7:.4f}, C4 EOD: {8:.4f}, C1 SPD: {9:.4f}, C2 SPD: {10:.4f}, C3 SPD: {11:.4f}, C4 SPD: {12:.4f}".format(np.mean(avg_acc[0]),np.mean(avg_acc[1]), np.mean(avg_acc[2]), np.mean(avg_acc[3]), np.mean(avg_acc[4]), np.mean(all_eod[0]), np.mean(all_eod[1]), np.mean(all_eod[2]), np.mean(all_eod[3]), np.mean(all_spd[0]), np.mean(all_spd[1]), np.mean(all_spd[2]), np.mean(all_spd[3]), inner_lr, lr ))
-    file.close()
+    # file = open("/home/ancarey/FairFLHN/experiments/new/pFedHN/results/four-layer-hp-compas.txt", "a")
+    # file.write(
+    #     "\n CLR: {13}, HLR: {14}, AVG Acc: {0:.4f}, C1 ACC: {1:.4f}, C2 ACC: {2:.4f}, C3 ACC: {3:.4f}, C4 ACC: {4:.4f}, C1 EOD: {5: .4f}, C2 EOD: {6:.4f}, C3 EOD: {7:.4f}, C4 EOD: {8:.4f}, C1 SPD: {9:.4f}, C2 SPD: {10:.4f}, C3 SPD: {11:.4f}, C4 SPD: {12:.4f}".format(np.mean(avg_acc[0]),np.mean(avg_acc[1]), np.mean(avg_acc[2]), np.mean(avg_acc[3]), np.mean(avg_acc[4]), np.mean(all_eod[0]), np.mean(all_eod[1]), np.mean(all_eod[2]), np.mean(all_eod[3]), np.mean(all_spd[0]), np.mean(all_spd[1]), np.mean(all_spd[2]), np.mean(all_spd[3]), inner_lr, lr ))
+    # file.close()
 
     print(f"\n\nFinal Results | AVG Acc: {np.mean(avg_acc[0]):.4f}")
     print(all_spd)
@@ -257,27 +250,27 @@ def main():
 
                 parser = argparse.ArgumentParser(description="Fair Hypernetworks")
 
-                parser.add_argument("--data_name", type=str, default="compas", choices=["adult", "compas"], help="choice of dataset")
+                parser.add_argument("--data_name", type=str, default="adult", choices=["adult", "compas"], help="choice of dataset")
                 parser.add_argument("--num_nodes", type=int, default=4, help="number of simulated clients")
                 parser.add_argument("--num_steps", type=int, default=s)
-                parser.add_argument("--batch_size", type=int, default=64)
+                parser.add_argument("--batch_size", type=int, default=256)
                 parser.add_argument("--inner_steps", type=int, default=50, help="number of inner steps")
                 parser.add_argument("--n_hidden", type=int, default=4, help="num. hidden layers")
-                parser.add_argument("--inner_lr", type=float, default=.05, help="learning rate for inner optimizer")
-                parser.add_argument("--lr", type=float, default=5e-5, help="learning rate")
+                parser.add_argument("--inner_lr", type=float, default=.001, help="learning rate for inner optimizer")
+                parser.add_argument("--lr", type=float, default=1e-5, help="learning rate")
                 parser.add_argument("--wd", type=float, default=1e-10, help="weight decay")
                 parser.add_argument("--inner_wd", type=float, default=1e-10, help="inner weight decay")
                 parser.add_argument("--hyper_hid", type=int, default=100, help="hypernet hidden dim")
                 parser.add_argument("--seed", type=int, default=0, help="seed value")
-                parser.add_argument("--fair", type=str, default="dp", choices=["none", "eo", "dp", "both"],
+                parser.add_argument("--fair", type=str, default="both", choices=["none", "eo", "dp", "both"],
                                     help="whether to use fairness of not.")
-                parser.add_argument("--alpha", type=int, default=[.01,.1], help="fairness/accuracy trade-off parameter")
-                parser.add_argument("--which_position", type=int, default=5, choices=[5, 8],
+                parser.add_argument("--alpha", type=int, default=[.01,.01], help="fairness/accuracy trade-off parameter")
+                parser.add_argument("--which_position", type=int, default=8, choices=[5, 8],
                                     help="which position the sensitive attribute is in. 5: compas, 8: adult")
                 args = parser.parse_args()
                 set_logger()
                 device = "cuda:2"
-                print(args.alpha[0], args.which_position)
+                print(args.fair)
                 args.classes_per_node = 2
                 train(
                     device=device,

@@ -538,7 +538,7 @@ def main():
                             help="which position the sensitive attribute is in. 5: compas, 8: adult")
         args = parser.parse_args()
         set_logger()
-        device = "cuda:2"
+        device = "cuda:6"
         print("\n====================")
         print("| Starting Training |")
         print("=====================")

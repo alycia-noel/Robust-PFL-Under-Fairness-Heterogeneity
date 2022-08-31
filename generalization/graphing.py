@@ -3,11 +3,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy import interpolate
 
-acc = [-.00454, -.0504, .00142, -.02524, -.0238]
-spd = [.01482, .03908, .00256, .02082, -.00818]
-eod = [.0242, .00464, .0132, -.03706, -.0425]
+acc = [-.00854, -.0504, .00172, -.02524, -.0238]
+spd = [.01482, .03908, .00256, .02082, .02182]
+eod = [-.01254, -.0085, .00086, -.0156, -.01524]
 
-x = [.3, .5, .7, .8, .9]
+x = [.3, .5, .7, .75, .8]
 
 sns.set(font_scale=1.25)
 
@@ -23,7 +23,7 @@ s = plt.bar(X + 0.50, data[2], color = 'r', width = 0.25)
 plt.xlabel('Total Variation (e-2)')
 plt.ylabel('Generalization Gap')
 plt.xticks(X + 0.25, x)
-plt.yticks([ -.05, -.04, -.03, -.02, -.01, 0, .01, .02, .03, .04])
+plt.yticks([ -.05, -.04, -.03, -.02, -.01, 0, .01, .02, .03])
 plt.legend(bbox_to_anchor=(0, 1.02, 1, 0.2), loc="lower left",
                 mode="expand", borderaxespad=0, ncol=3, labels=['Accuracy', 'EOD', 'SPD'])
 # Put a legend to the right of the current axis

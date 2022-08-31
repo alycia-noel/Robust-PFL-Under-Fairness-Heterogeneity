@@ -63,7 +63,7 @@ def evaluate(nodes, num_nodes, global_model, models, cnets, num_features, loss, 
             running_samples += len(y)
 
         tp, fp, tn, fn = TP_FP_TN_FN(queries_client, pred_client, true_client, which_position)
-
+        print(tp, fp, tn, fn)
         accuracy, EOD, SPD = metrics(tp, fp, tn, fn)
 
         a.append(accuracy)
@@ -77,7 +77,7 @@ def evaluate(nodes, num_nodes, global_model, models, cnets, num_features, loss, 
     return results, preds, true, a, eod, spd
 
 def train(save_file_name, device, data_name,model_name,classes_per_node,num_nodes,steps,inner_steps,lr,inner_lr,wd,inner_wd, hyper_hid,n_hidden,bs, alpha,fair, which_position):
-    b = 1/alpha[0]
+    b = 1/.01
     avg_acc = [[] for i in range(num_nodes + 1)]
     all_eod =  [[] for i in range(num_nodes)]
     all_spd = [[] for i in range(num_nodes)]
@@ -89,7 +89,7 @@ def train(save_file_name, device, data_name,model_name,classes_per_node,num_node
     alphas = []
 
     for i in range(1):
-        seed_everything(0)
+        seed_everything(42)
 
         nodes = BaseNodes(data_name, num_nodes, bs, classes_per_node, fairfed=False)
         num_features = len(nodes.features)
@@ -250,8 +250,8 @@ def main():
     # file = open("/home/ancarey/FairFLHN/experiments/new/FedAvg/all-runs.txt", "w")
     # file.close()
 
-    names = ['adult']#, 'compas']
-    fair = ['none']#['dp', 'eo', 'both']
+    names = ['compas']#, 'compas']
+    fair = ['dp']#['dp', 'eo', 'both']
 
     for i, n in enumerate(names):
         for j, f in enumerate(fair):

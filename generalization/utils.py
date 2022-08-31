@@ -54,12 +54,13 @@ def TP_FP_TN_FN(x, predicted_prediction, labels_pred, which_position):
 
     return TP, FP, TN, FN
 
-def metrics(TP, FP, TN, FN):
 
-    if (TP[1] + FN[1]) == 0 or (TP[2] + FN[2]) == 0:
+def metrics(TP, FP, TN, FN):
+    try:
+        eod = .5 * (((FP[1] / (FP[1] + TN[1])) - (FP[2] / (FP[2] + TN[2]))) + (
+                    (TP[1] / (TP[1] + FN[1])) - (TP[2] / (TP[2] + FN[2]))))
+    except ZeroDivisionError:
         eod = 0
-    else:
-        eod = (TP[1] / (TP[1] + FN[1])) - (TP[2] / (TP[2] + FN[2]))
 
     accuracy = (TP[0] + TN[0]) / (TP[0] + FP[0] + FN[0] + TN[0])
     spd = (TP[1] + FP[1]) / (TP[1] + FP[1] + TN[1] + FN[1]) - (TP[2] + FP[2]) / (TP[2] + FP[2] + TN[2] + FN[2])

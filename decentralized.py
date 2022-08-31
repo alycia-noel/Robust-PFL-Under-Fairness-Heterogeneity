@@ -37,8 +37,8 @@ def evaluate(model, device, which_position, test_loader):
         running_samples += len(y)
 
     tp, fp, tn, fn = TP_FP_TN_FN(queries, preds, true, which_position)
-    print(tp, fp, tn, fn)
-    accuracy, f_acc, m_acc, eod, spd = metrics(tp, fp, tn, fn)
+
+    accuracy, eod, spd = metrics(tp, fp, tn, fn)
 
     return accuracy, eod, spd
 
@@ -111,7 +111,7 @@ def main():
     alpha = 1
     num_nodes = 4
     fairness = 'both'
-    data_name = 'adult'
+    data_name = 'compas'
     classes_per_node = 2
     device = 'cuda:5'
     num_steps = 5000
@@ -150,7 +150,7 @@ def main():
                 fair = 'eo'
                 alpha = alphas[1]
 
-        print("\nTraining Client: ", i+1, fair, alpha)
+        print("\nTraining Client: ", i+1, fair)
         train(device=device, steps=num_steps, lr=lr, wd=wd, alpha=alpha, fair=fair, which_position=which_position, num_features=num_features, train_loader=nodes.train_loaders[i], test_loader=nodes.test_loaders[i], client_num=i+1)
 
 if __name__ == "__main__":
